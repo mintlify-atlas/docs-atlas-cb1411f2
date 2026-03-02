@@ -1,0 +1,120 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Apiser",
+  "projectDescription": "Collection of fully-typed tools to work in back-end with ease",
+  "theme": "aspen",
+  "primaryColor": "#3B82F6",
+  "lightColor": "#60A5FA",
+  "darkColor": "#2563EB",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Packages",
+            "pages": [
+              "packages/drizzle-model",
+              "packages/controller",
+              "packages/response",
+              "packages/logger",
+              "packages/schema"
+            ]
+          },
+          {
+            "group": "Utility Packages",
+            "pages": [
+              "packages/api-aggregator",
+              "packages/transform",
+              "packages/zod"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/drizzle-model-guide",
+              "guides/building-controllers",
+              "guides/response-handling",
+              "guides/logging",
+              "guides/validation"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Drizzle Model",
+            "pages": [
+              "api/drizzle-model/model-builder",
+              "api/drizzle-model/queries",
+              "api/drizzle-model/mutations",
+              "api/drizzle-model/refinement",
+              "api/drizzle-model/transactions"
+            ]
+          },
+          {
+            "group": "Controller",
+            "pages": [
+              "api/controller/handler",
+              "api/controller/bindings",
+              "api/controller/cache",
+              "api/controller/elysia"
+            ]
+          },
+          {
+            "group": "Response",
+            "pages": [
+              "api/response/response-handler",
+              "api/response/json-response",
+              "api/response/error-response",
+              "api/response/binary-response"
+            ]
+          },
+          {
+            "group": "Logger",
+            "pages": [
+              "api/logger/create-logger",
+              "api/logger/transports",
+              "api/logger/console-transport"
+            ]
+          },
+          {
+            "group": "Schema & Validation",
+            "pages": [
+              "api/schema/check-schema",
+              "api/schema/type-inference",
+              "api/zod/utilities"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Type-safe Drizzle ORM model runtime with progressive query building",
+    "Type-safe request/response handlers with schema validation",
+    "Structured logging with custom transports",
+    "API aggregation and composition utilities",
+    "Zod-based schema validation and type inference"
+  ],
+  "publicApiSurface": [
+    "modelBuilder - Create type-safe Drizzle ORM models",
+    "esc - Explicit where expression helper",
+    "createHandler - Create type-safe API handlers",
+    "createResponseHandler - Create structured response handlers",
+    "createLogger - Create structured logger with transports",
+    "createTransport - Create custom log transports",
+    "checkSchema - Validate input against Zod schemas",
+    "aggregate - Compose multiple API endpoints"
+  ]
+}
