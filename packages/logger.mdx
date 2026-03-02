@@ -1,0 +1,551 @@
+---
+title: "@apisr/logger"
+description: "Flexible, transport-based logging system with structured logging and auto-flush support"
+---
+
+## Overview
+
+`@apisr/logger` provides a powerful, flexible logging system with:
+
+- **Transport-based architecture** for multiple output destinations
+- **Structured logging** with JSON and pretty-print modes
+- **Auto-flush support** for reliable log delivery
+- **Multiple log levels** (debug, info, warn, error)
+- **Extensible transports** for custom logging targets
+- **Type-safe logging** with TypeScript support
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @apisr/logger
+```
+
+```bash bun
+bun add @apisr/logger
+```
+
+```bash pnpm
+pnpm add @apisr/logger
+```
+</CodeGroup>
+
+## Quick Start
+
+### Create a Logger
+
+```typescript
+import { createLogger } from "@apisr/logger";
+import { createConsole } from "@apisr/logger/console";
+
+const logger = createLogger({
+  name: "MyApp",
+  transports: {
+    console: createConsole({ mode: "pretty" }),
+  },
+});
+
+// Use the logger
+logger.info("Application started");
+logger.warn("This is a warning", { userId: "123" });
+logger.error("An error occurred", { error: "Database connection failed" });
+logger.debug("Debug information", { query: "SELECT * FROM users" });
+```
+
+### Console Transport Modes
+
+<Tabs>
+  <Tab title="Pretty Mode">
+    ```typescript
+    const logger = createLogger({
+      name: "MyApp",
+      transports: {
+        console: createConsole({ mode: "pretty" }),
+      },
+    });
+
+    logger.info("User logged in", { userId: "123", email: "user@example.com" });
+    ```
+    Output:
+    ```
+    [src/index.ts:10] INFO  User logged in
+    │ {
+    │   "userId": "123",
+    │   "email": "user@example.com"
+    │ }
+    ```
+  </Tab>
+  <Tab title="JSON Mode">
+    ```typescript
+    const logger = createLogger({
+      name: "MyApp",
+      transports: {
+        console: createConsole({ mode: "json" }),
+      },
+    });
+
+    logger.info("User logged in", { userId: "123" });
+    ```
+    Output:
+    ```json
+    {"timestamp":1234567890,"level":"info","message":"User logged in","data":{"userId":"123"},"file":{"path":"src/index.ts","codeLine":"10"}}
+    ```
+  </Tab>
+</Tabs>
+
+## Core Concepts
+
+### Log Levels
+
+<ParamField path="debug" type="(message: string, data?: Record<string, unknown>) => void">
+  Debug-level logging for detailed information
+</ParamField>
+
+<ParamField path="info" type="(message: string, data?: Record<string, unknown>) => void">
+  Info-level logging for general information
+</ParamField>
+
+<ParamField path="warn" type="(message: string, data?: Record<string, unknown>) => void">
+  Warning-level logging for warning messages
+</ParamField>
+
+<ParamField path="error" type="(message: string | Error, data?: Record<string, unknown>) => void">
+  Error-level logging for error messages
+</ParamField>
+
+### Structured Logging
+
+Attach structured data to your logs:
+
+```typescript
+logger.info("User created", {
+  userId: user.id,
+  email: user.email,
+  role: user.role,
+  createdAt: new Date().toISOString(),
+});
+
+logger.error("Database query failed", {
+  query: "SELECT * FROM users",
+  duration: 1234,
+  error: err.message,
+});
+```
+
+### Error Logging
+
+Log Error objects with full stack traces:
+
+```typescript
+try {
+  await riskyOperation();
+} catch (err) {
+  // Pass Error object directly
+  logger.error(err, { context: "riskyOperation" });
+}
+```
+
+The Error's stack trace and name are automatically included in the log data.
+
+## Transports
+
+### Console Transport
+
+Log to the console with customizable formatting:
+
+```typescript
+import { createConsole } from "@apisr/logger/console";
+
+const consoleTransport = createConsole({
+  mode: "pretty", // or "json"
+  format: () => {
+    // Custom format function
+    return "[CUSTOM] Custom log format";
+  },
+});
+
+const logger = createLogger({
+  name: "MyApp",
+  transports: {
+    console: consoleTransport,
+  },
+});
+```
+
+### Custom Transports
+
+Create your own transport for custom logging destinations:
+
+```typescript
+import { createTransport } from "@apisr/logger";
+
+const fileTransport = createTransport({
+  log: ({ timestamp, level, message, data, file }) => {
+    const logEntry = JSON.stringify({
+      timestamp,
+      level,
+      message,
+      data,
+      file,
+    });
+
+    // Write to file
+    Bun.write("./logs/app.log", logEntry + "\n", { append: true });
+  },
+  flush: async ({ logs, store }) => {
+    // Optional: batch write logs on flush
+    const content = logs
+      .map((log) => JSON.stringify(log))
+      .join("\n");
+
+    await Bun.write("./logs/batch.log", content + "\n", { append: true });
+  },
+});
+
+const logger = createLogger({
+  name: "MyApp",
+  transports: {
+    console: createConsole({ mode: "pretty" }),
+    file: fileTransport,
+  },
+});
+```
+
+### Transport Store
+
+Each transport has an isolated store for state management:
+
+```typescript
+const customTransport = createTransport({
+  log: ({ store, message, data }) => {
+    // Read from store
+    const count = store.get("logCount") || 0;
+
+    // Write to store
+    store.set("logCount", count + 1);
+    store.set("lastMessage", message);
+
+    console.log(`[${count + 1}] ${message}`, data);
+  },
+});
+```
+
+## Auto-Flush
+
+Automatically flush logs at intervals or on process events:
+
+```typescript
+const logger = createLogger({
+  name: "MyApp",
+  transports: {
+    console: createConsole({ mode: "json" }),
+  },
+  autoFlush: {
+    intervalMs: 5000, // Flush every 5 seconds
+    on: ["beforeExit", "SIGINT", "SIGTERM"], // Flush on process exit
+  },
+});
+```
+
+<ParamField path="autoFlush.intervalMs" type="number">
+  Interval in milliseconds to auto-flush logs
+</ParamField>
+
+<ParamField path="autoFlush.on" type="Array<'beforeExit' | 'SIGINT' | 'SIGTERM'>">
+  Process events that trigger flush
+</ParamField>
+
+### Manual Flush
+
+Manually flush logs when needed:
+
+```typescript
+await logger.flush();
+```
+
+## Targeted Logging
+
+Log to specific transports:
+
+```typescript
+const logger = createLogger({
+  name: "MyApp",
+  transports: {
+    console: createConsole({ mode: "pretty" }),
+    file: fileTransport,
+    remote: remoteTransport,
+  },
+});
+
+// Log to all transports
+logger.info("General message");
+
+// Log only to console
+logger.to("console").info("Console only");
+
+// Log to console and file
+logger.to(["console", "file"]).info("Console and file");
+```
+
+## Extending Loggers
+
+Create child loggers with modified transports:
+
+```typescript
+const logger = createLogger({
+  name: "ParentLogger",
+  transports: {
+    console: createConsole({ mode: "pretty" }),
+    file: fileTransport,
+  },
+});
+
+const childLogger = logger.extend({
+  name: "ChildLogger",
+  excludeTransport: ["file"], // Exclude file transport
+  mapTransport: ({ name, transport }) => {
+    if (name === "console") {
+      // Override console transport
+      return createConsole({ mode: "json" });
+    }
+    return transport;
+  },
+});
+
+childLogger.info("This goes to console only in JSON mode");
+```
+
+<ParamField path="extend.name" type="string">
+  Name for the child logger
+</ParamField>
+
+<ParamField path="extend.excludeTransport" type="string[]">
+  Transport names to exclude
+</ParamField>
+
+<ParamField path="extend.mapTransport" type="(ctx) => Transport">
+  Function to transform transports
+</ParamField>
+
+## Advanced Examples
+
+### Multi-Transport Logger
+
+```typescript
+import { createLogger, createTransport } from "@apisr/logger";
+import { createConsole } from "@apisr/logger/console";
+
+// Console transport for development
+const consoleTransport = createConsole({ mode: "pretty" });
+
+// File transport for persistent logs
+const fileTransport = createTransport({
+  log: ({ timestamp, level, message, data }) => {
+    const entry = {
+      timestamp: new Date(timestamp).toISOString(),
+      level,
+      message,
+      data,
+    };
+    Bun.write("./logs/app.log", JSON.stringify(entry) + "\n", {
+      append: true,
+    });
+  },
+});
+
+// Remote transport for centralized logging
+const remoteTransport = createTransport({
+  log: ({ timestamp, level, message, data, store }) => {
+    // Buffer logs
+    const buffer = store.get("buffer") || [];
+    buffer.push({ timestamp, level, message, data });
+    store.set("buffer", buffer);
+  },
+  flush: async ({ logs, store }) => {
+    // Send buffered logs to remote server
+    const buffer = store.get("buffer") || [];
+    if (buffer.length > 0) {
+      await fetch("https://logs.example.com/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ logs: buffer }),
+      });
+      store.set("buffer", []);
+    }
+  },
+});
+
+const logger = createLogger({
+  name: "ProductionApp",
+  transports: {
+    console: consoleTransport,
+    file: fileTransport,
+    remote: remoteTransport,
+  },
+  autoFlush: {
+    intervalMs: 10000, // Flush every 10 seconds
+    on: ["beforeExit", "SIGTERM"],
+  },
+});
+
+// Production usage
+logger.info("Server started", { port: 3000 });
+logger.error("Request failed", { statusCode: 500, path: "/api/users" });
+
+// Ensure logs are flushed before exit
+process.on("beforeExit", async () => {
+  await logger.flush();
+});
+```
+
+### Filtered Transport
+
+```typescript
+const errorOnlyTransport = createTransport({
+  log: ({ level, message, data }) => {
+    // Only log errors
+    if (level === "error") {
+      console.error(`ERROR: ${message}`, data);
+    }
+  },
+});
+
+const logger = createLogger({
+  name: "FilteredLogger",
+  transports: {
+    all: createConsole({ mode: "pretty" }),
+    errors: errorOnlyTransport,
+  },
+});
+
+logger.info("This goes to 'all' transport only");
+logger.error("This goes to both transports");
+```
+
+### Performance Monitoring Transport
+
+```typescript
+const performanceTransport = createTransport({
+  log: ({ level, message, data, store }) => {
+    const stats = store.get("stats") || {
+      debug: 0,
+      info: 0,
+      warn: 0,
+      error: 0,
+    };
+
+    stats[level]++;
+    store.set("stats", stats);
+
+    // Log stats every 100 messages
+    const total = Object.values(stats).reduce((a, b) => a + b, 0);
+    if (total % 100 === 0) {
+      console.log("Log statistics:", stats);
+    }
+  },
+});
+```
+
+## API Reference
+
+### createLogger
+
+<ParamField path="name" type="string">
+  Logger name for identification
+</ParamField>
+
+<ParamField path="transports" type="Record<string, Transport>">
+  Map of transport names to transport instances
+</ParamField>
+
+<ParamField path="autoFlush" type="AutoFlushOptions">
+  Auto-flush configuration
+</ParamField>
+
+### Logger Methods
+
+<ParamField path="debug" type="(message: string, data?: object) => void">
+  Log debug message
+</ParamField>
+
+<ParamField path="info" type="(message: string, data?: object) => void">
+  Log info message
+</ParamField>
+
+<ParamField path="warn" type="(message: string, data?: object) => void">
+  Log warning message
+</ParamField>
+
+<ParamField path="error" type="(message: string | Error, data?: object) => void">
+  Log error message or Error object
+</ParamField>
+
+<ParamField path="to" type="(transport: string | string[]) => Logger">
+  Target specific transports
+</ParamField>
+
+<ParamField path="flush" type="() => Promise<void>">
+  Manually flush all transports
+</ParamField>
+
+<ParamField path="extend" type="(options: ExtendOptions) => Logger">
+  Create child logger with modified configuration
+</ParamField>
+
+### createTransport
+
+<ParamField path="log" type="(ctx: LogContext) => void">
+  Function called for each log entry
+</ParamField>
+
+<ParamField path="flush" type="(ctx: FlushContext) => void | Promise<void>">
+  Optional function called on flush
+</ParamField>
+
+### createConsole
+
+<ParamField path="mode" type="'json' | 'pretty'">
+  Output format mode
+</ParamField>
+
+<ParamField path="format" type="() => string">
+  Custom format function
+</ParamField>
+
+## Type Safety
+
+`@apisr/logger` is fully type-safe:
+
+```typescript
+const logger = createLogger({
+  name: "TypedLogger",
+  transports: {
+    console: createConsole({ mode: "pretty" }),
+    file: fileTransport,
+  },
+});
+
+// ✅ Type-safe transport targeting
+logger.to("console").info("Message");
+logger.to(["console", "file"]).info("Message");
+
+// ❌ Type error: unknown transport
+logger.to("unknown").info("Message");
+```
+
+## Performance Tips
+
+<CardGroup cols={2}>
+  <Card title="Use JSON Mode in Production" icon="gauge-high">
+    JSON mode is faster than pretty mode for production logging.
+  </Card>
+  <Card title="Batch Flush" icon="layer-group">
+    Use flush intervals to batch writes and reduce I/O operations.
+  </Card>
+  <Card title="Async Transports" icon="bolt">
+    Make transport flush functions async for non-blocking I/O.
+  </Card>
+  <Card title="Filter Logs" icon="filter">
+    Filter log levels in transports to reduce processing overhead.
+  </Card>
+</CardGroup>

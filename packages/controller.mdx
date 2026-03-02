@@ -1,0 +1,566 @@
+---
+title: "@apisr/controller"
+description: "Type-safe controller abstraction with caching, validation, and powerful binding system"
+---
+
+## Overview
+
+`@apisr/controller` provides a powerful, type-safe way to build API controllers with:
+
+- **Type-safe handler functions** with automatic payload validation
+- **Flexible binding system** for dependency injection
+- **Built-in caching support** with configurable strategies
+- **Response handler integration** for consistent API responses
+- **Elysia.js integration** for seamless framework adoption
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @apisr/controller
+```
+
+```bash bun
+bun add @apisr/controller
+```
+
+```bash pnpm
+pnpm add @apisr/controller
+```
+</CodeGroup>
+
+### Peer Dependencies
+
+<Tabs>
+  <Tab title="Optional">
+    ```json package.json
+    {
+      "peerDependencies": {
+        "elysia": "^1.4.25",
+        "keyv": "^5.6.0"
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  Install `elysia` if using Elysia integration, and `keyv` if using caching features.
+</Note>
+
+## Quick Start
+
+### Create a Handler
+
+```typescript
+import { createHandler } from "@apisr/controller";
+import { z } from "zod";
+
+const handler = createHandler({
+  name: "myHandler",
+  responseHandler: myResponseHandler,
+});
+
+// Define a handler with payload validation
+const getUser = handler(
+  async ({ payload, fail }) => {
+    const user = await db.user.findUnique({
+      where: { id: payload.userId },
+    });
+
+    if (!user) {
+      throw fail("notFound", { resource: "User" });
+    }
+
+    return user;
+  },
+  {
+    payload: z.object({
+      userId: z.string(),
+    }),
+  }
+);
+
+// Call the handler
+const result = await getUser({ userId: "123" });
+```
+
+## Core Concepts
+
+### Handler Context
+
+Every handler callback receives a context object with:
+
+<ParamField path="payload" type="T">
+  Validated input data based on the payload schema
+</ParamField>
+
+<ParamField path="fail" type="(name, input?) => ErrorResponse">
+  Create error responses from defined error handlers
+</ParamField>
+
+<ParamField path="cache" type="CacheFn">
+  Cache function for storing/retrieving data
+</ParamField>
+
+<ParamField path="redirect" type="(to: string, returnType?) => any">
+  Redirect helper function
+</ParamField>
+
+### Payload Validation
+
+Validate incoming data with Zod schemas:
+
+```typescript
+import { z } from "zod";
+
+const createPost = handler(
+  async ({ payload }) => {
+    return await db.post.create({
+      data: payload,
+    });
+  },
+  {
+    payload: z.object({
+      title: z.string().min(1),
+      content: z.string(),
+      authorId: z.string(),
+      tags: z.array(z.string()).optional(),
+    }),
+  }
+);
+```
+
+<Tip>
+  The payload is automatically validated before your handler runs. Invalid data throws an error.
+</Tip>
+
+### Sources Resolution
+
+Payload validation supports multiple data sources:
+
+```typescript
+const updateUser = handler(
+  async ({ payload }) => {
+    // payload.userId comes from params
+    // payload.name comes from body
+    return await db.user.update({
+      where: { id: payload.userId },
+      data: { name: payload.name },
+    });
+  },
+  {
+    payload: z.object({
+      userId: z.from("params").string(),
+      name: z.from("body").string(),
+    }),
+  }
+);
+```
+
+**Available sources:**
+- `params` — URL path parameters
+- `body` — Request body
+- `headers` — HTTP headers
+- `query` — Query string parameters
+- `handler.payload` — Handler payload
+
+## Caching
+
+### Handler-Level Caching
+
+Configure caching at the handler level:
+
+```typescript
+const handler = createHandler({
+  name: "cachedHandler",
+  cache: {
+    store: keyvStore,
+    ttl: 60000, // 60 seconds
+    key: (payload) => `user:${payload.userId}`,
+    wrapHandler: true,
+  },
+});
+
+const getUser = handler(
+  async ({ payload }) => {
+    // This will be cached automatically
+    return await db.user.findUnique({
+      where: { id: payload.userId },
+    });
+  },
+  {
+    payload: z.object({ userId: z.string() }),
+  }
+);
+```
+
+### Call-Level Caching
+
+Override caching per handler call:
+
+```typescript
+const getUser = handler(
+  async ({ payload, cache }) => {
+    // Manual caching control
+    return await cache(
+      `user:${payload.userId}`,
+      async () => {
+        return await db.user.findUnique({
+          where: { id: payload.userId },
+        });
+      }
+    );
+  },
+  {
+    payload: z.object({ userId: z.string() }),
+    cache: {
+      ttl: 30000, // Override TTL for this handler
+    },
+  }
+);
+```
+
+<ParamField path="cache.store" type="CacheStore">
+  Cache storage backend (e.g., Keyv instance)
+</ParamField>
+
+<ParamField path="cache.ttl" type="number">
+  Time-to-live in milliseconds
+</ParamField>
+
+<ParamField path="cache.key" type="string | (payload) => string">
+  Cache key or key generator function
+</ParamField>
+
+<ParamField path="cache.wrapHandler" type="boolean">
+  Automatically cache entire handler result
+</ParamField>
+
+## Bindings System
+
+Bindings provide dependency injection for handlers:
+
+```typescript
+import { createHandler, bindingsHelpers } from "@apisr/controller";
+
+const handler = createHandler({
+  name: "myHandler",
+  bindings: (bind) => ({
+    // Always inject current user
+    currentUser: bind.alwaysInject({
+      resolve: async ({ request }) => {
+        const token = request.headers.get("authorization");
+        return await getUserFromToken(token);
+      },
+    }),
+
+    // Optionally inject database connection
+    db: bind.inject({
+      resolve: async ({ payload }) => {
+        return createDbConnection(payload.dbName);
+      },
+    }),
+  }),
+});
+
+const getUser = handler(
+  async ({ payload, currentUser, db }) => {
+    // currentUser is always available
+    // db is available when specified in options
+    return await db.user.findUnique({
+      where: { id: payload.userId },
+    });
+  },
+  {
+    payload: z.object({ userId: z.string() }),
+    db: { dbName: "main" }, // Enable db binding
+  }
+);
+```
+
+### Binding Modes
+
+<Tabs>
+  <Tab title="alwaysInject">
+    ```typescript
+    bindings: (bind) => ({
+      currentUser: bind.alwaysInject({
+        resolve: async ({ request }) => {
+          return await getUserFromToken(
+            request.headers.get("authorization")
+          );
+        },
+      }),
+    })
+    ```
+    Always injected into every handler context.
+  </Tab>
+  <Tab title="inject">
+    ```typescript
+    bindings: (bind) => ({
+      db: bind.inject({
+        resolve: async ({ payload }) => {
+          return createDbConnection();
+        },
+      }),
+    })
+    ```
+    Injected only when specified in handler options.
+  </Tab>
+  <Tab title="variativeInject">
+    ```typescript
+    bindings: (bind) => ({
+      feature: bind.variativeInject({
+        resolve: async ({ payload }) => {
+          if (payload.enableFeature) {
+            return { featureEnabled: true };
+          }
+          return undefined;
+        },
+      }),
+    })
+    ```
+    May or may not be present (returns `T | undefined`).
+  </Tab>
+</Tabs>
+
+## Elysia Integration
+
+Seamlessly integrate with Elysia.js:
+
+```typescript
+import { Elysia } from "elysia";
+import { createHandler } from "@apisr/controller/elysia";
+
+const handler = createHandler({
+  name: "elysiaHandler",
+});
+
+const getUser = handler(
+  async ({ payload }) => {
+    return await db.user.findUnique({
+      where: { id: payload.userId },
+    });
+  },
+  {
+    payload: z.object({ userId: z.string() }),
+  }
+);
+
+const app = new Elysia()
+  .get("/users/:userId", async ({ params }) => {
+    return await getUser(params);
+  })
+  .listen(3000);
+```
+
+<Tip>
+  Import from `@apisr/controller/elysia` for Elysia-specific features.
+</Tip>
+
+## Error Handling
+
+Use the `fail` function to create consistent error responses:
+
+```typescript
+const handler = createHandler({
+  name: "myHandler",
+  responseHandler: createResponseHandler({})
+    .defineError(
+      "notFound",
+      ({ input }) => ({
+        message: `${input.resource} not found`,
+        code: "NOT_FOUND",
+      }),
+      { status: 404 }
+    ),
+});
+
+const getUser = handler(
+  async ({ payload, fail }) => {
+    const user = await db.user.findUnique({
+      where: { id: payload.userId },
+    });
+
+    if (!user) {
+      throw fail("notFound", { resource: "User" });
+    }
+
+    return user;
+  },
+  {
+    payload: z.object({ userId: z.string() }),
+  }
+);
+```
+
+## Direct vs Raw Mode
+
+Handlers support two execution modes:
+
+<Tabs>
+  <Tab title="Direct Mode">
+    ```typescript
+    // Returns { data, error }
+    const result = await getUser({ userId: "123" });
+
+    if (result.error) {
+      console.error(result.error);
+    } else {
+      console.log(result.data);
+    }
+    ```
+  </Tab>
+  <Tab title="Raw Mode">
+    ```typescript
+    // Returns Response object
+    const response = await getUser.raw({
+      request: new Request("http://localhost/users/123"),
+    });
+
+    console.log(response.status); // 200
+    const data = await response.json();
+    ```
+  </Tab>
+</Tabs>
+
+## Advanced Examples
+
+### Multi-Step Handler with Caching
+
+```typescript
+const getPostWithAuthor = handler(
+  async ({ payload, cache }) => {
+    const post = await cache(
+      `post:${payload.postId}`,
+      async () => {
+        return await db.post.findUnique({
+          where: { id: payload.postId },
+        });
+      }
+    );
+
+    if (!post) {
+      throw fail("notFound", { resource: "Post" });
+    }
+
+    const author = await cache(
+      `user:${post.authorId}`,
+      async () => {
+        return await db.user.findUnique({
+          where: { id: post.authorId },
+        });
+      }
+    );
+
+    return {
+      ...post,
+      author,
+    };
+  },
+  {
+    payload: z.object({ postId: z.string() }),
+  }
+);
+```
+
+### Handler with Multiple Bindings
+
+```typescript
+const handler = createHandler({
+  name: "multiBindingHandler",
+  bindings: (bind) => ({
+    auth: bind.alwaysInject({
+      resolve: async ({ request }) => {
+        return await authenticate(request);
+      },
+    }),
+    logger: bind.alwaysInject({
+      resolve: () => createLogger(),
+    }),
+    db: bind.inject({
+      resolve: () => createDbConnection(),
+    }),
+  }),
+});
+
+const createPost = handler(
+  async ({ payload, auth, logger, db }) => {
+    logger.info("Creating post", { userId: auth.user.id });
+
+    const post = await db.post.create({
+      data: {
+        ...payload,
+        authorId: auth.user.id,
+      },
+    });
+
+    logger.info("Post created", { postId: post.id });
+    return post;
+  },
+  {
+    payload: z.object({
+      title: z.string(),
+      content: z.string(),
+    }),
+    db: true, // Enable db binding
+  }
+);
+```
+
+## API Reference
+
+### createHandler
+
+<ParamField path="name" type="string">
+  Handler name for debugging and caching
+</ParamField>
+
+<ParamField path="responseHandler" type="ResponseHandler">
+  Response handler instance for consistent responses
+</ParamField>
+
+<ParamField path="bindings" type="(helpers) => Bindings">
+  Function that defines available bindings
+</ParamField>
+
+<ParamField path="cache" type="CacheOptions">
+  Default cache configuration for all handlers
+</ParamField>
+
+### Handler Options
+
+<ParamField path="payload" type="Schema">
+  Zod schema for payload validation
+</ParamField>
+
+<ParamField path="cache" type="CacheOptions">
+  Cache configuration for this handler
+</ParamField>
+
+<ParamField path="[bindingName]" type="any">
+  Binding-specific options (when using `inject` mode)
+</ParamField>
+
+## Type Safety
+
+`@apisr/controller` provides full TypeScript support:
+
+- Payload types are inferred from Zod schemas
+- Binding types are inferred from resolve functions
+- Error types are inferred from error definitions
+- Context types adapt based on enabled bindings
+
+```typescript
+const getUser = handler(
+  async ({ payload }) => {
+    // payload is typed as { userId: string }
+    payload.userId; // ✅ Type-safe
+    payload.email; // ❌ Type error
+  },
+  {
+    payload: z.object({ userId: z.string() }),
+  }
+);
+```

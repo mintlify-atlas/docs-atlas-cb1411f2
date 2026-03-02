@@ -1,0 +1,383 @@
+---
+title: "Query Methods"
+description: "Fetch data from your database with type-safe query methods: findMany, findFirst, count, and where."
+---
+
+## Overview
+
+Query methods retrieve data from your database. All methods return promises that resolve to formatted results based on your model's `format` function.
+
+## findMany
+
+Fetch all rows matching the current query conditions.
+
+### Syntax
+
+```ts
+model.findMany() => ModelQueryResult<T[]>
+```
+
+### Return Type
+
+- Returns: `Promise<T[]>` where `T` is your table row type after formatting
+- Empty array if no rows match
+
+### Examples
+
+<Tabs>
+  <Tab title="Basic">
+    ```ts
+    const users = await userModel.findMany();
+    // Returns all users
+    ```
+  </Tab>
+  
+  <Tab title="With Filter">
+    ```ts
+    const verified = await userModel
+      .where({ isVerified: esc(true) })
+      .findMany();
+    ```
+  </Tab>
+  
+  <Tab title="With Relations">
+    ```ts
+    const usersWithPosts = await userModel
+      .findMany()
+      .with({ posts: true });
+    ```
+  </Tab>
+  
+  <Tab title="Selected Fields">
+    ```ts
+    const users = await userModel
+      .findMany()
+      .select({ id: true, name: true });
+    // Only fetches id and name columns
+    ```
+  </Tab>
+</Tabs>
+
+## findFirst
+
+Fetch the first row matching the current query conditions.
+
+### Syntax
+
+```ts
+model.findFirst() => ModelQueryResult<T | undefined>
+```
+
+### Return Type
+
+- Returns: `Promise<T | undefined>` where `T` is your table row type
+- `undefined` if no row matches
+
+### Examples
+
+<Tabs>
+  <Tab title="Basic">
+    ```ts
+    const user = await userModel.findFirst();
+    // Returns first user or undefined
+    
+    if (user) {
+      console.log(user.name);
+    }
+    ```
+  </Tab>
+  
+  <Tab title="With Filter">
+    ```ts
+    const user = await userModel
+      .where({ id: esc(1) })
+      .findFirst();
+    ```
+  </Tab>
+  
+  <Tab title="With Relations">
+    ```ts
+    const user = await userModel
+      .findFirst()
+      .with({ posts: true, invitee: true });
+    
+    // user.posts and user.invitee are loaded
+    ```
+  </Tab>
+  
+  <Tab title="Safe Execution">
+    ```ts
+    const result = await userModel
+      .where({ id: esc(999) })
+      .findFirst()
+      .safe();
+    
+    if (result.error) {
+      console.error(result.error);
+    } else {
+      console.log(result.data); // T | undefined
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## count
+
+Count rows matching the current query conditions.
+
+### Syntax
+
+```ts
+model.count() => Promise<number>
+```
+
+### Return Type
+
+- Returns: `Promise<number>`
+- Returns `0` if no rows match
+
+### Examples
+
+<Tabs>
+  <Tab title="Total Count">
+    ```ts
+    const total = await userModel.count();
+    // Total number of users
+    ```
+  </Tab>
+  
+  <Tab title="Filtered Count">
+    ```ts
+    const verified = await userModel
+      .where({ isVerified: esc(true) })
+      .count();
+    ```
+  </Tab>
+  
+  <Tab title="Multiple Conditions">
+    ```ts
+    const adults = await userModel
+      .where({ 
+        age: esc.gte(18),
+        isVerified: esc(true)
+      })
+      .count();
+    ```
+  </Tab>
+</Tabs>
+
+## where
+
+Add filter conditions to your query. Can be chained multiple times (conditions are combined with AND).
+
+### Syntax
+
+```ts
+model.where(conditions) => Model
+```
+
+### Parameters
+
+<ParamField path="conditions" type="WhereClause" required>
+  Object mapping column names to values or operator expressions.
+  
+  All literal values must be wrapped with `esc()` or use `esc.method()` chainable operators.
+</ParamField>
+
+### Where Clause Operators
+
+#### Equality (Implicit)
+
+```ts
+{ name: esc("Alex") }
+// WHERE name = 'Alex'
+```
+
+#### Comparison Operators
+
+```ts
+{ age: esc.gt(18) }          // age > 18
+{ age: esc.gte(18) }         // age >= 18
+{ age: esc.lt(65) }          // age < 65
+{ age: esc.lte(65) }         // age <= 65
+{ status: esc.not("banned") } // status != 'banned'
+```
+
+#### Pattern Matching
+
+```ts
+{ name: esc.like("%Alex%") }   // LIKE '%Alex%'
+{ email: esc.ilike("%@GMAIL.COM") } // ILIKE (case-insensitive)
+```
+
+#### Array Operators
+
+```ts
+{ status: esc.in(["active", "pending"]) }    // IN (...)
+{ role: esc.nin(["banned", "suspended"]) }  // NOT IN (...)
+```
+
+#### Range Operators
+
+```ts
+{ age: esc.between(18, 65) }       // BETWEEN 18 AND 65
+{ price: esc.notBetween(0, 10) }  // NOT BETWEEN 0 AND 10
+```
+
+#### Null Checks
+
+```ts
+{ deletedAt: { isNull: true } }  // IS NULL
+```
+
+#### Multiple Conditions (AND)
+
+```ts
+.where({
+  age: esc.gte(18),
+  isVerified: esc(true),
+  status: esc.in(["active", "premium"])
+})
+// WHERE age >= 18 AND is_verified = true AND status IN ('active', 'premium')
+```
+
+#### Logical OR
+
+```ts
+.where({
+  email: {
+    or: [
+      esc.like("%@gmail.com"),
+      esc.like("%@yahoo.com")
+    ]
+  }
+})
+// WHERE email LIKE '%@gmail.com' OR email LIKE '%@yahoo.com'
+```
+
+### Examples
+
+<Tabs>
+  <Tab title="Simple Filter">
+    ```ts
+    const users = await userModel
+      .where({ name: esc("Alex") })
+      .findMany();
+    ```
+  </Tab>
+  
+  <Tab title="Multiple Conditions">
+    ```ts
+    const users = await userModel
+      .where({ 
+        age: esc.gte(18),
+        isVerified: esc(true)
+      })
+      .findMany();
+    ```
+  </Tab>
+  
+  <Tab title="Chained Where">
+    ```ts
+    const users = await userModel
+      .where({ isVerified: esc(true) })
+      .where({ age: esc.gte(18) })
+      .findMany();
+    // Both conditions are combined with AND
+    ```
+  </Tab>
+  
+  <Tab title="Complex Filters">
+    ```ts
+    const users = await userModel
+      .where({
+        age: esc.between(18, 65),
+        status: esc.in(["active", "premium"]),
+        email: esc.like("%@company.com")
+      })
+      .findMany();
+    ```
+  </Tab>
+  
+  <Tab title="Using Drizzle Operators">
+    ```ts
+    import { gte } from "drizzle-orm";
+    
+    const users = await userModel
+      .where({ age: esc(gte, 18) })
+      .findMany();
+    ```
+  </Tab>
+  
+  <Tab title="Raw SQL">
+    ```ts
+    import { sql } from "drizzle-orm";
+    
+    const users = await userModel
+      .where(sql`age > 18 AND status = 'active'`)
+      .findMany();
+    ```
+  </Tab>
+</Tabs>
+
+### Return Value
+
+Returns a new model instance with the where clause applied. The original model is unchanged.
+
+```ts
+const base = userModel;
+const filtered = base.where({ isVerified: esc(true) });
+
+// base is unmodified
+await base.count(); // All users
+
+// filtered includes the condition
+await filtered.count(); // Only verified users
+```
+
+## Chaining Queries
+
+All query methods support method chaining with refinement methods:
+
+```ts
+const users = await userModel
+  .where({ isVerified: esc(true) })
+  .findMany()
+  .with({ posts: true })
+  .select({ id: true, name: true })
+  .exclude({ email: true });
+```
+
+## Type Safety
+
+All query methods preserve full type information:
+
+```ts
+const user = await userModel.findFirst();
+// user: User | undefined
+
+const users = await userModel.findMany();
+// users: User[]
+
+const count = await userModel.count();
+// count: number
+```
+
+## Notes
+
+<Note>
+  **Why `esc()`?** Explicit escaping prevents accidental plain values in where clauses, ensuring type safety and preventing SQL injection.
+</Note>
+
+<Warning>
+  The `where()` method returns a new model instance. Always chain or assign the result.
+  
+  ```ts
+  // ❌ Wrong - discards the result
+  userModel.where({ id: esc(1) });
+  await userModel.findFirst(); // No filter applied!
+  
+  // ✅ Correct
+  await userModel.where({ id: esc(1) }).findFirst();
+  ```
+</Warning>

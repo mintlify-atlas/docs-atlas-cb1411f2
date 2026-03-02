@@ -1,0 +1,331 @@
+---
+title: Bindings
+description: Dependency injection system for handlers with support for models, values, and custom bindings
+---
+
+## Overview
+
+Bindings provide a powerful dependency injection system for handlers, allowing you to inject models, values, and custom dependencies into handler contexts.
+
+## BindingsHelpers
+
+Helper methods available in the bindings factory function.
+
+### bind
+
+Wraps a binding factory for type consistency.
+
+```typescript
+bindings: (bind) => ({
+  currentUser: bind((options) => ({
+    resolve: async ({ request, fail }) => {
+      const token = request?.headers.authorization;
+      const user = await verifyToken(token);
+      if (!user) throw fail('unauthorized', {});
+      return user;
+    },
+  })),
+})
+```
+
+<ParamField path="factory" type="BindingFactory" required>
+  A function that returns a binding definition
+</ParamField>
+
+<ParamField path="bindingName" type="string">
+  Optional explicit name for the binding (for literal type preservation)
+</ParamField>
+
+<ResponseField name="factory" type="BindingFactory">
+  The wrapped binding factory with proper typing
+</ResponseField>
+
+### model
+
+Creates a model binding for automatic entity loading.
+
+```typescript
+bindings: (bind) => ({
+  user: bind.model(User, {
+    from: 'params',
+    fromKey: 'userId',
+    primaryKey: 'id',
+    async load({ id, fail }) {
+      const user = await User.findById(id);
+      if (!user) throw fail('notFound', { id });
+      return user;
+    },
+  }),
+})
+```
+
+<ParamField path="model" type="ModelIdentifier" required>
+  The model class or identifier to bind
+</ParamField>
+
+<ParamField path="options" type="BindingModelOptions | BindingModelOptions[]">
+  Configuration for model loading
+  
+  <ParamField path="from" type="'params' | 'query' | 'headers' | 'body'" default="params">
+    Source to extract the identifier from
+  </ParamField>
+  
+  <ParamField path="fromKey" type="string">
+    Key to extract from the source (defaults to model name)
+  </ParamField>
+  
+  <ParamField path="primaryKey" type="string" default="id">
+    Primary key field name
+  </ParamField>
+  
+  <ParamField path="where" type="Record<string, unknown>">
+    Additional where conditions to apply
+  </ParamField>
+  
+  <ParamField path="transform" type="() => unknown">
+    Function to transform the extracted value
+  </ParamField>
+  
+  <ParamField path="load" type="(ctx: { [key]: unknown, fail }) => Promise<Model>">
+    Custom loader function for fetching the model
+  </ParamField>
+  
+  <ParamField path="notFound" type="(ctx: { [key]: unknown, fail }) => Promise<Model | undefined>">
+    Handler for when the model is not found
+  </ParamField>
+</ParamField>
+
+<ResponseField name="factory" type="BindingFactory">
+  A binding factory that loads and validates the model
+</ResponseField>
+
+### value
+
+Creates a static value binding.
+
+```typescript
+bindings: (bind) => ({
+  config: bind.value({
+    apiUrl: 'https://api.example.com',
+    timeout: 5000,
+  }),
+})
+```
+
+<ParamField path="value" type="TValue" required>
+  The value to inject into the handler context
+</ParamField>
+
+<ResponseField name="factory" type="BindingFactory">
+  A binding factory that returns the static value
+</ResponseField>
+
+## BindingDefinition
+
+The core binding definition interface.
+
+```typescript
+interface BindingDefinition<
+  TPayloadSchema,
+  TResult,
+  THandler,
+  TResponseHandler,
+  TMode
+> {
+  mode?: TMode;
+  payload?: TPayloadSchema;
+  inject?: (ctx: BindingInjectContext) => PromiseOr<boolean>;
+  resolve: (ctx: BindingResolveContext) => Promise<TResult>;
+}
+```
+
+<ParamField path="mode" type="BindingMode" default="toInject">
+  How the binding is injected into handlers
+  
+  - `"toInject"`: Requires explicit opt-in via handler options
+  - `"alwaysInjected"`: Always injected into every handler
+  - `"variativeInject"`: Conditionally injected based on `inject` function
+</ParamField>
+
+<ParamField path="payload" type="Schema">
+  Schema for validating the binding's payload
+</ParamField>
+
+<ParamField path="inject" type="(ctx: BindingInjectContext) => Promise<boolean> | boolean">
+  Function to determine if the binding should be injected (for `variativeInject` mode)
+  
+  <ParamField path="ctx.payload" type="InferBindingPayload">
+    The validated payload
+  </ParamField>
+  
+  <ParamField path="ctx.request" type="HandlerRequest | null">
+    The current request object
+  </ParamField>
+  
+  <ParamField path="ctx.bindingName" type="string">
+    The name of this binding
+  </ParamField>
+  
+  <ParamField path="ctx.handler" type="unknown">
+    The handler context
+  </ParamField>
+</ParamField>
+
+<ParamField path="resolve" type="(ctx: BindingResolveContext) => Promise<TResult>" required>
+  Function that resolves the binding value
+  
+  <ParamField path="ctx.payload" type="InferBindingPayload">
+    The validated payload
+  </ParamField>
+  
+  <ParamField path="ctx.handler" type="unknown">
+    The handler context
+  </ParamField>
+  
+  <ParamField path="ctx.bindingName" type="string">
+    The name of this binding
+  </ParamField>
+  
+  <ParamField path="ctx.request" type="HandlerRequest | null">
+    The current request object
+  </ParamField>
+  
+  <ParamField path="ctx.fail" type="(name: string, input: any) => never">
+    Function to throw formatted errors
+  </ParamField>
+</ParamField>
+
+## BindingInstance
+
+Marker type to prevent object destructuring in handler context.
+
+```typescript
+type BindingInstance<T> = T & {
+  [bindingInstanceSymbol]: never;
+};
+```
+
+When a binding returns a `BindingInstance`, it will be injected under its binding name instead of being spread into the context.
+
+```typescript
+// Without BindingInstance - fields are spread
+const binding1 = () => ({
+  resolve: async () => ({ name: 'John', age: 30 })
+});
+// Context: { name: 'John', age: 30 }
+
+// With BindingInstance - kept under binding name
+const binding2 = () => ({
+  resolve: async () => ({
+    name: 'John',
+    age: 30,
+    [bindingInstanceSymbol]: ''
+  })
+});
+// Context: { user: { name: 'John', age: 30 } }
+```
+
+## Usage Examples
+
+### Custom Authentication Binding
+
+```typescript
+import { createOptions } from '@apisr/controller';
+import { verifyJWT } from './auth';
+
+const options = createOptions({
+  bindings: (bind) => ({
+    auth: bind((required = true) => ({
+      mode: 'variativeInject',
+      async inject({ request }) {
+        // Only inject if authorization header exists
+        return !!request?.headers.authorization;
+      },
+      async resolve({ request, fail }) {
+        const token = request?.headers.authorization?.replace('Bearer ', '');
+        if (!token && required) {
+          throw fail('unauthorized', { message: 'Missing token' });
+        }
+        
+        if (!token) return null;
+        
+        const user = await verifyJWT(token);
+        if (!user && required) {
+          throw fail('unauthorized', { message: 'Invalid token' });
+        }
+        
+        return user;
+      },
+    })),
+  }),
+});
+
+// Use in handler
+const handler = createHandler(options);
+
+const protectedRoute = handler(
+  async ({ auth }) => {
+    return { userId: auth.id };
+  },
+  { auth: true } // required auth
+);
+
+const optionalRoute = handler(
+  async ({ auth }) => {
+    return { userId: auth?.id };
+  },
+  { auth: false } // optional auth
+);
+```
+
+### Database Transaction Binding
+
+```typescript
+const options = createOptions({
+  bindings: (bind) => ({
+    transaction: bind(() => ({
+      mode: 'alwaysInjected',
+      async resolve() {
+        const trx = await db.transaction();
+        
+        return {
+          db: trx,
+          async commit() {
+            await trx.commit();
+          },
+          async rollback() {
+            await trx.rollback();
+          },
+          [bindingInstanceSymbol]: '',
+        };
+      },
+    })),
+  }),
+});
+```
+
+### Multi-Option Model Binding
+
+```typescript
+const options = createOptions({
+  bindings: (bind) => ({
+    post: bind.model(Post, [
+      {
+        from: 'params',
+        fromKey: 'postId',
+        primaryKey: 'id',
+      },
+      {
+        where: { published: true },
+      },
+      {
+        async load({ id, fail }) {
+          const post = await Post.findById(id);
+          if (!post) throw fail('notFound', { id });
+          return post;
+        },
+      },
+    ]),
+  }),
+});
+```

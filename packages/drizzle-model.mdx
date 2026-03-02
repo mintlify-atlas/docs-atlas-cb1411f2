@@ -1,0 +1,499 @@
+---
+title: "@apisr/drizzle-model"
+description: "Type-safe, chainable model runtime for Drizzle ORM with progressive query building"
+---
+
+<Warning>
+  **Development Status**: This package is in active development and not recommended for production use yet. APIs may change between minor versions. Semantic versioning will be enforced after v1.0.0 stable release.
+</Warning>
+
+<Note>
+  **Requires Drizzle ORM Beta**: Built for `drizzle-orm@^1.0.0-beta.2-86f844e` with relations v2.
+</Note>
+
+## Overview
+
+`@apisr/drizzle-model` adds a powerful model abstraction layer on top of Drizzle ORM, providing:
+
+- **Reusable model abstraction per table** — encapsulate table logic in models
+- **Progressive query pipeline** — build queries step-by-step with clear intent
+- **Unified result-shaping layer** — consistent formatting and transformation
+- **Safe execution flows** — error handling without try-catch boilerplate
+- **Reusable business logic extensions** — custom methods and model composition
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @apisr/drizzle-model drizzle-orm@beta
+```
+
+```bash bun
+bun add @apisr/drizzle-model drizzle-orm@beta
+```
+
+```bash pnpm
+pnpm add @apisr/drizzle-model drizzle-orm@beta
+```
+</CodeGroup>
+
+<Note>
+  `drizzle-orm` is a peer dependency. You must install a beta version (≥ 1.0.0-beta.2).
+</Note>
+
+## Quick Start
+
+### Create Your First Model
+
+```typescript
+import { modelBuilder, esc } from "@apisr/drizzle-model";
+import { drizzle } from "drizzle-orm/node-postgres";
+import * as schema from "./schema";
+import { relations } from "./relations";
+
+const db = drizzle(process.env.DATABASE_URL!, { schema, relations });
+
+const model = modelBuilder({
+  db,
+  schema,
+  relations, // requires DrizzleORM relations v2
+  dialect: "PostgreSQL",
+});
+
+const userModel = model("user", {});
+```
+
+### Basic Queries
+
+```typescript
+// Find one user
+const user = await userModel.findFirst();
+
+// Find with filter (use esc() for literal values)
+const users = await userModel
+  .where({ name: esc("Alex") })
+  .findMany();
+
+// Count records
+const total = await userModel.count();
+const verified = await userModel
+  .where({ isVerified: esc(true) })
+  .count();
+```
+
+## Philosophy
+
+### Why not just use Drizzle directly?
+
+**Without drizzle-model:**
+```typescript
+import { eq } from "drizzle-orm";
+
+await db
+  .select()
+  .from(schema.user)
+  .where(eq(schema.user.id, 1));
+```
+
+**With drizzle-model:**
+```typescript
+await userModel.where({ id: esc(1) }).findFirst();
+```
+
+The difference becomes more apparent with:
+- Consistent formatting across queries
+- Reusable where conditions
+- Nested relation loading
+- Custom business logic methods
+
+## Progressive Query Pipeline
+
+Queries flow through four stages:
+
+1. **Intent Stage** — declare what you want (`where`, `insert`, `update`, ...)
+2. **Execution Stage** — choose execution (`findMany`, `findFirst`, `return`, `returnFirst`)
+3. **Refinement Stage** — shape the SQL query (`select`, `exclude`, `with`)
+4. **Programmatic Polishing** — post-process the result (`omit`, `raw`, `safe`)
+
+## Core Features
+
+### Using `esc()` for Type Safety
+
+The `esc()` function provides three ways to specify comparisons:
+
+<Tabs>
+  <Tab title="Implicit Equality">
+    ```typescript
+    where({ name: esc("Alex") })
+    ```
+  </Tab>
+  <Tab title="Chainable Methods">
+    ```typescript
+    where({ name: esc.like("%Alex%") })
+    where({ age: esc.gte(18) })
+    where({ status: esc.in(["active", "pending"]) })
+    where({ price: esc.between(10, 100) })
+    ```
+  </Tab>
+  <Tab title="Drizzle Operators">
+    ```typescript
+    import { gte } from "drizzle-orm";
+    where({ age: esc(gte, 18) })
+    ```
+  </Tab>
+</Tabs>
+
+**Available chainable methods:**
+- `esc.eq(value)` — equality
+- `esc.not(value)` — inequality
+- `esc.gt(value)`, `esc.gte(value)` — greater than
+- `esc.lt(value)`, `esc.lte(value)` — less than
+- `esc.like(pattern)`, `esc.ilike(pattern)` — pattern matching
+- `esc.in(values)`, `esc.nin(values)` — array membership
+- `esc.between(min, max)`, `esc.notBetween(min, max)` — range
+
+### Basic Writes
+
+<Tabs>
+  <Tab title="Insert">
+    ```typescript
+    await userModel.insert({
+      name: "New User",
+      email: "new@example.com",
+      age: 18,
+    });
+    ```
+  </Tab>
+  <Tab title="Update">
+    ```typescript
+    const updated = await userModel
+      .where({ id: esc(1) })
+      .update({ name: "Updated" })
+      .returnFirst();
+    ```
+  </Tab>
+  <Tab title="Delete">
+    ```typescript
+    await userModel.where({ id: esc(2) }).delete();
+    ```
+  </Tab>
+  <Tab title="Upsert">
+    ```typescript
+    const row = await userModel
+      .upsert({
+        insert: { name: "Alex", email: "alex@ex.com", age: 20 },
+        update: { name: "Alex Updated" },
+        target: schema.user.email,
+      })
+      .returnFirst();
+    ```
+  </Tab>
+</Tabs>
+
+### Result Refinement
+
+#### Loading Relations with `.with()`
+
+```typescript
+// Load related posts for each user
+const users = await userModel
+  .findMany()
+  .with({ posts: true });
+
+// Nested relations
+const users = await userModel
+  .findMany()
+  .with({
+    posts: {
+      comments: true,
+    },
+  });
+
+// Query where relations
+const users = await userModel
+  .findMany()
+  .with({
+    posts: postModel.where({
+      title: {
+        like: "New%"
+      }
+    }),
+  });
+
+// Use .include() to add nested relations to filtered models
+const users = await userModel.findMany().with({
+  posts: postModel.where({
+    title: { like: "New%" }
+  }).include({
+    comments: true
+  })
+});
+```
+
+<Note>
+  **No N+1 queries**: `.with()` uses JOIN-based loading, not separate queries per row.
+</Note>
+
+#### SQL Column Selection
+
+```typescript
+// Only fetch specific columns
+const users = await userModel
+  .findMany()
+  .select({ id: true, name: true });
+
+// Exclude specific columns
+const users = await userModel
+  .findMany()
+  .exclude({ email: true });
+
+// Combine select and exclude
+const users = await userModel
+  .findMany()
+  .select({ id: true, name: true, email: true })
+  .exclude({ email: true });
+```
+
+### Error-Safe Execution
+
+Use `.safe()` for error-as-value patterns:
+
+```typescript
+const result = await userModel.findMany().safe();
+
+if (result.error) {
+  console.error(result.error);
+} else {
+  console.log(result.data);
+}
+```
+
+<ParamField path="result" type="SafeResult<T>">
+  ```typescript
+  type SafeResult<T> =
+    | { data: T; error: undefined }
+    | { data: undefined; error: unknown };
+  ```
+</ParamField>
+
+### Transactions
+
+Use `.db()` to bind a model to a transaction:
+
+```typescript
+await db.transaction(async (tx) => {
+  const txUser = userModel.db(tx);
+  const txPost = postModel.db(tx);
+  
+  const user = await txUser.insert({
+    name: "Alice",
+    email: "alice@example.com",
+    age: 25,
+  }).returnFirst();
+  
+  await txPost.insert({
+    title: "First Post",
+    content: "Hello world",
+    authorId: user.id,
+  });
+});
+```
+
+## Advanced Features
+
+### Format Function
+
+Transform every row returned from queries:
+
+```typescript
+const postModel = model("post", {
+  format(row) {
+    return {
+      ...row,
+      createdAt: new Date(row.createdAt),
+      updatedAt: row.updatedAt ? new Date(row.updatedAt) : null,
+    };
+  },
+});
+
+// Use .raw() to bypass format when needed
+const rawPost = await postModel.findFirst().raw();
+```
+
+### Default Where Conditions
+
+```typescript
+const activeUsers = model("user", {
+  where: { isVerified: esc(true) },
+});
+```
+
+### Custom Methods
+
+```typescript
+const userModel = model("user", {
+  methods: {
+    async byEmail(email: string) {
+      return await userModel.where({ email: esc(email) }).findFirst();
+    },
+    async adults() {
+      return await userModel.where({ age: esc.gte(18) }).findMany();
+    },
+  },
+});
+
+// Use custom methods
+const user = await userModel.byEmail("alex@example.com");
+const adults = await userModel.adults();
+```
+
+### Extending Models
+
+```typescript
+const extended = userModel.extend({
+  methods: {
+    async findActive() {
+      return await userModel.where({ status: esc("active") }).findMany();
+    },
+  },
+});
+```
+
+<Warning>
+  When method names conflict during `extend`, existing runtime methods take precedence over newly passed ones.
+</Warning>
+
+## Performance Considerations
+
+<CardGroup cols={2}>
+  <Card title="Selective Loading" icon="filter">
+    Use `.select()` to fetch only needed columns and reduce payload size.
+  </Card>
+  <Card title="Count Optimization" icon="hashtag">
+    Use `.count()` instead of `.findMany()` when you only need the count.
+  </Card>
+  <Card title="Index Usage" icon="bolt">
+    Add database indexes on columns used in `.where()` conditions.
+  </Card>
+  <Card title="Skip Formatting" icon="rabbit">
+    Use `.raw()` to skip formatting when performance is critical.
+  </Card>
+</CardGroup>
+
+## API Reference
+
+### Intent Stage
+
+<ParamField path="where" type="(value) => Model">
+  Filter conditions for queries
+</ParamField>
+
+<ParamField path="insert" type="(value) => Model">
+  Insert new rows
+</ParamField>
+
+<ParamField path="update" type="(value) => Model">
+  Update existing rows
+</ParamField>
+
+<ParamField path="delete" type="() => Model">
+  Delete rows
+</ParamField>
+
+<ParamField path="upsert" type="(value) => Model">
+  Insert or update rows
+</ParamField>
+
+### Execution Stage
+
+<ParamField path="findMany" type="() => Promise<T[]>">
+  Fetch multiple rows
+</ParamField>
+
+<ParamField path="findFirst" type="() => Promise<T | undefined>">
+  Fetch first matching row
+</ParamField>
+
+<ParamField path="count" type="() => Promise<number>">
+  Count matching rows
+</ParamField>
+
+<ParamField path="return" type="() => Promise<T[]>">
+  Return all affected rows from mutations
+</ParamField>
+
+<ParamField path="returnFirst" type="() => Promise<T | undefined>">
+  Return first affected row from mutations
+</ParamField>
+
+### Refinement Stage
+
+<ParamField path="with" type="(relations) => Promise<T>">
+  Load related entities via JOINs
+</ParamField>
+
+<ParamField path="select" type="(fields) => Promise<T>">
+  SQL SELECT whitelist
+</ParamField>
+
+<ParamField path="exclude" type="(fields) => Promise<T>">
+  SQL SELECT blacklist
+</ParamField>
+
+### Programmatic Stage
+
+<ParamField path="omit" type="(fields) => Promise<T>">
+  Remove fields from result after query (not SQL)
+</ParamField>
+
+<ParamField path="raw" type="() => Promise<T>">
+  Skip format function
+</ParamField>
+
+<ParamField path="safe" type="() => Promise<SafeResult<T>>">
+  Wrap result in `{ data, error }`
+</ParamField>
+
+<ParamField path="debug" type="() => Model">
+  Inspect query state
+</ParamField>
+
+### Model-level Utilities
+
+<ParamField path="include" type="(value) => Model">
+  Specify nested relations for model instances in `.with()`
+</ParamField>
+
+<ParamField path="extend" type="(options) => Model">
+  Create extended model with additional methods
+</ParamField>
+
+<ParamField path="db" type="(dbInstance) => Model">
+  Bind model to different db/transaction instance
+</ParamField>
+
+## Compatibility
+
+| Drizzle Version | Supported | Notes |
+|------------------|-----------|-------|
+| v1 beta (≥ 1.0.0-beta.2) | ✅ Yes | Requires relations v2 |
+| v0.x stable | ❌ No | Relations v1 not supported |
+
+**Supported dialects:**
+- PostgreSQL
+- MySQL
+- SQLite
+
+**Runtime requirements:**
+- Node.js 18+
+- Bun 1.0+
+
+## Limitations
+
+<Warning>
+  - **Requires Drizzle ORM relations v2** — v1 relations are not supported
+  - **Explicit `esc()` required** — plain values in `.where()` are not allowed (by design for type safety)
+  - **No lazy loading** — relations must be loaded eagerly with `.with()`
+  - **No middleware system** — use `format()` for transformations
+  - **No automatic soft deletes** — implement via default `where` conditions
+</Warning>

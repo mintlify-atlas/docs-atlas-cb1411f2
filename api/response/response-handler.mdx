@@ -1,0 +1,325 @@
+---
+title: ResponseHandler
+description: Core class for creating and managing HTTP responses with type safety
+---
+
+The `ResponseHandler` class provides a fluent API for creating type-safe JSON, binary, text, and error responses. Use `createResponseHandler` to instantiate a handler with custom options.
+
+## createResponseHandler
+
+Factory function to create a `ResponseHandler` instance with custom configuration.
+
+```typescript
+import { createResponseHandler, options } from '@apisr/response';
+
+const handler = createResponseHandler((opts) => ({
+  json: opts.json({
+    mapData: (data) => ({ data, success: true })
+  }),
+  meta: opts.meta({
+    default: () => ({ timestamp: Date.now() })
+  })
+}));
+```
+
+### Parameters
+
+<ParamField path="opts" type="Options | (options) => Options" required>
+  Configuration object or function that receives option builders and returns configuration.
+  
+  - `meta` - Metadata options for responses
+  - `json` - JSON response configuration
+  - `binary` - Binary response configuration
+  - `error` - Error handling configuration
+</ParamField>
+
+### Returns
+
+Returns a configured `ResponseHandler` instance.
+
+## ResponseHandler Class
+
+The main response handler class that provides methods for creating different types of responses.
+
+### Constructor
+
+Prefer using `createResponseHandler` instead of calling the constructor directly.
+
+<ParamField path="options" type="Options" required>
+  Handler configuration options
+</ParamField>
+
+<ParamField path="errors" type="ErrorRegistry">
+  Optional pre-defined error registry
+</ParamField>
+
+<ParamField path="preasignedMeta" type="Partial<Meta>">
+  Optional meta merged into each response
+</ParamField>
+
+### Methods
+
+#### json()
+
+Create a JSON response with automatic serialization and validation.
+
+```typescript
+const response = handler.json(
+  { users: [{ id: 1, name: 'Alice' }] },
+  { status: 200 }
+);
+```
+
+<ParamField path="input" type="IInput" required>
+  JSON-serializable data to include in the response body
+</ParamField>
+
+<ParamField path="options" type="JsonResponse.Options">
+  Optional response configuration
+  
+  - `status` - HTTP status code (default: 200)
+  - `statusText` - HTTP status text
+  - `headers` - Additional HTTP headers
+</ParamField>
+
+**Returns:** `JsonResponse.Base<IInput>` - JSON response instance
+
+#### binary()
+
+Create a binary response for files, images, or streams.
+
+```typescript
+const blob = new Blob(['Hello'], { type: 'text/plain' });
+const response = handler.binary(blob, {
+  status: 200,
+  headers: { 'Content-Disposition': 'attachment; filename="hello.txt"' }
+});
+```
+
+<ParamField path="binary" type="Binary" required>
+  Binary payload: `Blob`, `ArrayBuffer`, `Uint8Array`, or `ReadableStream`
+</ParamField>
+
+<ParamField path="options" type="BinaryResponse.Options">
+  Optional response configuration
+  
+  - `status` - HTTP status code (default: 200)
+  - `statusText` - HTTP status text
+  - `headers` - Additional HTTP headers
+</ParamField>
+
+**Returns:** `BinaryResponse.Base` - Binary response instance
+
+#### text()
+
+Create a plain text response.
+
+```typescript
+const response = handler.text('Hello, World!', { status: 200 });
+```
+
+<ParamField path="text" type="string" required>
+  Raw text response body
+</ParamField>
+
+<ParamField path="options" type="TextResponse.Options">
+  Optional response configuration
+</ParamField>
+
+**Returns:** `TextResponse.Base` - Text response instance
+
+#### fail()
+
+Create an error response by name. Supports both built-in default errors and custom errors defined via `defineError`.
+
+```typescript
+// Built-in error
+const response = handler.fail('notFound');
+
+// Custom error with input
+const response = handler.fail('validationError', {
+  field: 'email',
+  message: 'Invalid email format'
+});
+```
+
+<ParamField path="name" type="string" required>
+  Error name (registered via `defineError` or built-in default type)
+  
+  Built-in error types:
+  - `unauthorized` - 401 Unauthorized
+  - `forbidden` - 403 Forbidden
+  - `notFound` - 404 Not Found
+  - `badRequest` - 400 Bad Request
+  - `conflict` - 409 Conflict
+  - `tooMany` - 429 Too Many Requests
+  - `internal` - 500 Internal Server Error
+</ParamField>
+
+<ParamField path="input" type="TInput">
+  Optional error payload to validate (if error has an input schema)
+</ParamField>
+
+**Returns:** `ErrorResponse.Base` - Error response instance
+
+#### defineError()
+
+Define a custom error handler. Returns a new `ResponseHandler` instance with the error registered.
+
+```typescript
+import { z } from '@apisr/zod';
+
+const handlerWithError = handler.defineError(
+  'validationError',
+  ({ input }) => ({
+    message: input.message,
+    field: input.field,
+    code: 'VALIDATION_ERROR'
+  }),
+  {
+    status: 422,
+    statusText: 'Unprocessable Entity',
+    input: z.object({
+      field: z.string(),
+      message: z.string()
+    })
+  }
+);
+
+// Now you can use it
+const response = handlerWithError.fail('validationError', {
+  field: 'email',
+  message: 'Invalid format'
+});
+```
+
+<ParamField path="name" type="string" required>
+  Error name to register
+</ParamField>
+
+<ParamField path="handler" type="ErrorHandler | ErrorOutput" required>
+  Error handler function or static error output object
+</ParamField>
+
+<ParamField path="options" type="ErrorHandlerOptions">
+  Error configuration
+  
+  - `status` - HTTP status code
+  - `statusText` - HTTP status text
+  - `input` - Input schema for validation
+  - `validationType` - Validation type ("parse" or "assert")
+</ParamField>
+
+**Returns:** New `ResponseHandler` instance with the error registered
+
+#### withMeta()
+
+Create a new handler with preassigned metadata that will be merged into each response.
+
+```typescript
+const handlerWithMeta = handler.withMeta({
+  requestId: 'req-123',
+  userId: 'user-456'
+});
+
+const response = handlerWithMeta.json({ message: 'Success' });
+// Response includes requestId and userId in metadata
+```
+
+<ParamField path="meta" type="Partial<Meta>" required>
+  Partial metadata that will be merged into each response
+</ParamField>
+
+**Returns:** New `ResponseHandler` instance with preassigned metadata
+
+## Example Usage
+
+### Basic JSON Response
+
+```typescript
+import { createResponseHandler } from '@apisr/response';
+
+const handler = createResponseHandler({});
+
+export const GET = async () => {
+  const users = await db.users.findMany();
+  return handler.json({ users });
+};
+```
+
+### With Custom Configuration
+
+```typescript
+import { createResponseHandler, options } from '@apisr/response';
+import { z } from '@apisr/zod';
+
+const handler = createResponseHandler((opts) => ({
+  json: opts.json({
+    mapData: (data) => ({
+      data,
+      success: true,
+      timestamp: Date.now()
+    })
+  }),
+  meta: opts.meta({
+    schema: z.object({
+      requestId: z.string(),
+      version: z.string()
+    }),
+    default: () => ({
+      requestId: crypto.randomUUID(),
+      version: '1.0'
+    })
+  })
+}));
+```
+
+### Error Handling
+
+```typescript
+import { createResponseHandler } from '@apisr/response';
+import { z } from '@apisr/zod';
+
+const handler = createResponseHandler({}).defineError(
+  'resourceNotFound',
+  ({ input }) => ({
+    message: `${input.resource} not found`,
+    code: 'RESOURCE_NOT_FOUND',
+    resource: input.resource
+  }),
+  {
+    status: 404,
+    statusText: 'Not Found',
+    input: z.object({ resource: z.string() })
+  }
+);
+
+export const GET = async ({ params }) => {
+  const user = await db.users.findById(params.id);
+  
+  if (!user) {
+    return handler.fail('resourceNotFound', { resource: 'User' });
+  }
+  
+  return handler.json({ user });
+};
+```
+
+### Binary Response
+
+```typescript
+import { createResponseHandler } from '@apisr/response';
+
+const handler = createResponseHandler({});
+
+export const GET = async () => {
+  const pdfBuffer = await generatePDF();
+  
+  return handler.binary(pdfBuffer, {
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'attachment; filename="report.pdf"'
+    }
+  });
+};
+```

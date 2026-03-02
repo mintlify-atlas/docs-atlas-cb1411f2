@@ -1,0 +1,182 @@
+---
+title: Console Transport
+description: Built-in console transport with JSON and pretty-print modes
+---
+
+## createConsole
+
+Creates a console transport with support for JSON and pretty-printed output.
+
+```typescript
+import { createConsole } from '@daytona/logger/transports/console';
+```
+
+### Signature
+
+```typescript
+function createConsole(options?: ConsoleTransportOptions): Transport
+```
+
+### Parameters
+
+<ParamField path="options" type="ConsoleTransportOptions">
+  Optional configuration for the console transport
+
+  <ParamField path="options.mode" type="'json' | 'pretty'" default="'json'">
+    Output format mode:
+    - `"json"`: Outputs logs as JSON strings (default)
+    - `"pretty"`: Outputs logs with colors and formatting for better readability
+  </ParamField>
+
+  <ParamField path="options.format" type="() => string">
+    Optional custom format function. When provided, this function is called instead of the default formatting logic. Use this for complete control over the output format.
+  </ParamField>
+</ParamField>
+
+### Returns
+
+A `Transport` instance that can be used with `createLogger`.
+
+### Example: JSON Mode (Default)
+
+```typescript
+import { createLogger } from '@daytona/logger';
+import { createConsole } from '@daytona/logger/transports/console';
+
+const logger = createLogger({
+  transports: {
+    console: createConsole({ mode: 'json' })
+  }
+});
+
+logger.info('User action', { userId: '123', action: 'login' });
+// Output: {"timestamp":1234567890,"level":"info","data":{"userId":"123","action":"login"},"file":{"path":"/src/app.ts","codeLine":"42"},"message":"User action"}
+```
+
+### Example: Pretty Mode
+
+```typescript
+import { createLogger } from '@daytona/logger';
+import { createConsole } from '@daytona/logger/transports/console';
+
+const logger = createLogger({
+  transports: {
+    console: createConsole({ mode: 'pretty' })
+  }
+});
+
+logger.info('Server started', { port: 3000 });
+// Output (with colors):
+// ┌[/src/server.ts:15]
+// INFO  Server started
+// │ {
+// │   "port": 3000
+// └ }
+
+logger.warn('High memory usage');
+// Output (with colors):
+// [/src/monitor.ts:23] WARN  High memory usage
+
+logger.error(new Error('Connection failed'), { host: 'db.example.com' });
+// Output (with colors):
+// ┌[/src/db.ts:89]
+// ERROR Connection failed
+// │ {
+// │   "host": "db.example.com",
+// │   "stack": "Error: Connection failed\n    at ...",
+// │   "name": "Error"
+// └ }
+```
+
+### Pretty Mode Features
+
+When using `mode: 'pretty'`, the console transport:
+
+- **Color-codes log levels:**
+  - `debug`: Cyan
+  - `info`: Green
+  - `warn`: Yellow
+  - `error`: Red
+
+- **Formats file paths:** Shows relative paths and filters out `node_modules`
+
+- **Pretty-prints data:** Uses JSON colorization with tree-style borders when additional data is present
+
+- **Highlights messages:** Uses bold white text for better visibility
+
+### Example: Custom Format Function
+
+```typescript
+import { createLogger } from '@daytona/logger';
+import { createConsole } from '@daytona/logger/transports/console';
+
+const logger = createLogger({
+  transports: {
+    console: createConsole({
+      format: () => {
+        // Access log context from closure
+        // Note: format() is called within the log function's context
+        return 'Custom formatted output';
+      }
+    })
+  }
+});
+
+// For more complex custom formatting, consider creating a custom transport:
+const customConsole = createTransport({
+  log: ({ timestamp, level, message, data, file }) => {
+    const date = new Date(timestamp).toISOString();
+    console.log(`${date} [${level}] ${message}`);
+    if (Object.keys(data).length > 0) {
+      console.log('  Data:', JSON.stringify(data, null, 2));
+    }
+  }
+});
+```
+
+### Example: Multiple Console Transports
+
+```typescript
+import { createLogger } from '@daytona/logger';
+import { createConsole } from '@daytona/logger/transports/console';
+
+const logger = createLogger({
+  transports: {
+    prettyConsole: createConsole({ mode: 'pretty' }),
+    jsonConsole: createConsole({ mode: 'json' })
+  }
+});
+
+// Log to pretty console only
+logger.to('prettyConsole').info('Development log');
+
+// Log to JSON console only
+logger.to('jsonConsole').info('Production log');
+
+// Log to both
+logger.info('Both formats');
+```
+
+### Flush Behavior
+
+The console transport implements a `flush` function that does nothing, since console output is synchronous and doesn't require buffering. This ensures compatibility with the logger's flush mechanism.
+
+```typescript
+const logger = createLogger({
+  transports: {
+    console: createConsole({ mode: 'pretty' })
+  }
+});
+
+logger.info('Message');
+await logger.flush(); // Safe to call, but no-op for console transport
+```
+
+## Type Definitions
+
+```typescript
+interface ConsoleTransportOptions {
+  format?: () => string;
+  mode?: "json" | "pretty";
+}
+```

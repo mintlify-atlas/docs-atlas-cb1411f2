@@ -1,0 +1,598 @@
+---
+title: Drizzle Model Guide
+description: Comprehensive guide for building type-safe, chainable models with @apisr/drizzle-model
+---
+
+## Overview
+
+`@apisr/drizzle-model` adds a powerful model abstraction layer on top of Drizzle ORM, providing:
+
+- **Reusable model abstraction per table** — encapsulate table logic in reusable models
+- **Progressive query pipeline** — build queries step-by-step with clear intent
+- **Unified result-shaping layer** — consistent formatting and transformation
+- **Safe execution flows** — error handling without try-catch boilerplate
+- **Composable model extensions** — custom methods and model composition
+
+<Warning>
+**Development Status**
+
+This package is in active development and **not recommended for production use yet**. APIs may change between minor versions. Semantic versioning will be enforced after v1.0.0 stable release.
+</Warning>
+
+<Warning>
+**Requires `drizzle-orm@beta`**
+
+This package is built for Drizzle ORM beta versions (`^1.0.0-beta.2-86f844e`). Make sure you're using compatible versions.
+</Warning>
+
+## Installation
+
+<Steps>
+
+<Step title="Install dependencies">
+
+Install both `@apisr/drizzle-model` and the beta version of `drizzle-orm`:
+
+```bash
+bun add @apisr/drizzle-model drizzle-orm@beta
+```
+
+</Step>
+
+<Step title="Set up your database connection">
+
+Create your Drizzle database instance with schema and relations:
+
+```ts
+import { drizzle } from "drizzle-orm/node-postgres";
+import * as schema from "./schema";
+import { relations } from "./relations";
+
+const db = drizzle(process.env.DATABASE_URL!, { schema, relations });
+```
+
+<Note>
+This package requires **Drizzle ORM relations v2**. See the [Drizzle relations documentation](https://orm.drizzle.team/docs/relations-v1-v2) for migration guidance.
+</Note>
+
+</Step>
+
+<Step title="Create the model builder">
+
+Initialize the model builder with your database configuration:
+
+```ts
+import { modelBuilder } from "@apisr/drizzle-model";
+
+const model = modelBuilder({
+  db,
+  schema,
+  relations,
+  dialect: "PostgreSQL", // or "MySQL" or "SQLite"
+});
+```
+
+</Step>
+
+<Step title="Create your first model">
+
+Create a model for a table:
+
+```ts
+const userModel = model("user", {});
+
+// With formatting
+const postModel = model("post", {
+  format(row) {
+    return {
+      ...row,
+      createdAt: new Date(row.createdAt),
+      updatedAt: row.updatedAt ? new Date(row.updatedAt) : null,
+    };
+  },
+});
+```
+
+</Step>
+
+</Steps>
+
+## Progressive Query Pipeline
+
+The model API follows a progressive flow with four stages:
+
+### 1. Intent Stage
+
+Declare what you want to do:
+
+```ts
+import { esc } from "@apisr/drizzle-model";
+
+// Read operations
+userModel.where({ id: esc(1) })
+userModel.where({ name: esc("Alex"), isVerified: esc(true) })
+
+// Write operations
+userModel.insert({ name: "New User", email: "new@example.com", age: 18 })
+userModel.update({ name: "Updated" })
+userModel.delete()
+userModel.upsert({ /* ... */ })
+```
+
+<Warning>
+**Why `esc()`?**
+
+Plain values are **not allowed** in `.where()` by design for type safety. Always wrap literal values with `esc()`:
+
+```ts
+// ✅ Correct
+const users = await userModel.where({ name: esc("Alex") }).findMany();
+
+// ❌ Wrong - Type error!
+const users = await userModel.where({ name: "Alex" }).findMany();
+```
+</Warning>
+
+### 2. Execution Stage
+
+Choose how to execute:
+
+**For queries:**
+```ts
+// Fetch multiple rows
+const users = await userModel.findMany();
+
+// Fetch first matching row
+const user = await userModel.where({ id: esc(1) }).findFirst();
+
+// Count matching rows
+const total = await userModel.count();
+const verified = await userModel.where({ isVerified: esc(true) }).count();
+```
+
+**For mutations:**
+```ts
+// Execute without returning
+await userModel.where({ id: esc(2) }).delete();
+
+// Return all affected rows
+const rows = await userModel
+  .insert({ email: "a@b.com", name: "Alex", age: 20 })
+  .return();
+
+// Return first affected row
+const first = await userModel
+  .where({ id: esc(1) })
+  .update({ name: "Updated" })
+  .returnFirst();
+```
+
+### 3. Refinement Stage
+
+Shape the SQL query and load relations:
+
+```ts
+// Select specific columns (SQL SELECT whitelist)
+const users = await userModel
+  .findMany()
+  .select({ id: true, name: true });
+
+// Exclude columns (SQL SELECT blacklist)
+const users = await userModel
+  .findMany()
+  .exclude({ email: true });
+
+// Load relations
+const users = await userModel
+  .findMany()
+  .with({ posts: true });
+
+// Nested relations
+const users = await userModel
+  .findMany()
+  .with({
+    posts: {
+      comments: true,
+    },
+  });
+```
+
+### 4. Programmatic Stage
+
+Post-process the result:
+
+```ts
+// Skip format function
+const rawUser = await userModel.findFirst().raw();
+
+// Remove fields after query (programmatic, not SQL)
+const sanitized = await userModel
+  .where({ id: esc(1) })
+  .update({ secretField: 999 })
+  .returnFirst()
+  .omit({ secretField: true });
+
+// Wrap in { data, error }
+const result = await userModel.findMany().safe();
+if (result.error) {
+  console.error(result.error);
+} else {
+  console.log(result.data);
+}
+```
+
+## Advanced Where Conditions
+
+The `esc()` function provides three ways to specify comparison operators:
+
+### 1. Implicit Equality (Simplest)
+
+```ts
+const user = await userModel.where({ name: esc("Alex") }).findFirst();
+```
+
+### 2. Explicit Operator (Drizzle-style)
+
+```ts
+import { gte } from "drizzle-orm";
+
+const adults = await userModel.where({ age: esc(gte, 18) }).findMany();
+```
+
+### 3. Chainable Methods (Recommended)
+
+```ts
+// Comparison operators
+const adults = await userModel.where({ age: esc.gte(18) }).findMany();
+const kids = await userModel.where({ age: esc.lt(18) }).findMany();
+
+// Pattern matching
+const results = await userModel
+  .where({ name: esc.like("%Alex%") })
+  .findMany();
+
+// IN operator
+const active = await userModel
+  .where({ status: esc.in(["active", "pending"]) })
+  .findMany();
+
+// Range queries
+const priced = await postModel
+  .where({ price: esc.between(10, 100) })
+  .findMany();
+```
+
+<Tip>
+**Available chainable methods:**
+
+- `esc.eq(value)` — equality
+- `esc.not(value)` — inequality
+- `esc.gt(value)` / `esc.gte(value)` — greater than (or equal)
+- `esc.lt(value)` / `esc.lte(value)` — less than (or equal)
+- `esc.like(pattern)` / `esc.ilike(pattern)` — pattern matching
+- `esc.in(values)` / `esc.nin(values)` — value in/not in array
+- `esc.between(min, max)` / `esc.notBetween(min, max)` — range queries
+</Tip>
+
+## Loading Relations
+
+### Basic Relation Loading
+
+```ts
+// Load single relation
+const users = await userModel.findMany().with({ posts: true });
+
+// Load multiple relations
+const users = await userModel
+  .findMany()
+  .with({
+    posts: true,
+    invitee: true,
+  });
+```
+
+### Nested Relations
+
+```ts
+const users = await userModel
+  .findMany()
+  .with({
+    posts: {
+      comments: {
+        author: true,
+      },
+    },
+  });
+```
+
+### Filtered Relations
+
+```ts
+const users = await userModel.findMany().with({
+  posts: postModel.where({
+    title: esc.like("New%"),
+  }),
+});
+```
+
+### Using `.include()` for Nested Relations in Filtered Models
+
+When you pass a model with `.where()` to `.with()`, use `.include()` to also load nested relations:
+
+```ts
+// Load posts with a filter AND their comments
+const users = await userModel.findMany().with({
+  posts: postModel
+    .where({
+      title: esc.like("New%"),
+    })
+    .include({
+      comments: true,
+    }),
+});
+```
+
+<Note>
+`.include()` is a type-level helper that preserves the model's where clause while adding relation loading. It doesn't affect SQL directly, but enables type-safe nested relation selection.
+</Note>
+
+## Transactions
+
+Use `.db()` to bind a model to a transaction instance:
+
+```ts
+await db.transaction(async (tx) => {
+  const txUser = userModel.db(tx);
+  const txPost = postModel.db(tx);
+  
+  const user = await txUser.insert({
+    name: "Alice",
+    email: "alice@example.com",
+    age: 25,
+  }).returnFirst();
+  
+  await txPost.insert({
+    title: "First Post",
+    content: "Hello world",
+    authorId: user.id,
+  });
+});
+```
+
+## Model Options & Extensions
+
+### Format Function
+
+Transform every row returned from queries:
+
+```ts
+const userModel = model("user", {
+  format(row) {
+    const { secretField, ...rest } = row;
+    return {
+      ...rest,
+      isVerified: Boolean(rest.isVerified),
+    };
+  },
+});
+
+// Real-world example: date parsing and sanitization
+const postModel = model("post", {
+  format(row) {
+    return {
+      ...row,
+      createdAt: new Date(row.createdAt),
+      updatedAt: row.updatedAt ? new Date(row.updatedAt) : null,
+      // Remove internal fields
+      internalStatus: undefined,
+    };
+  },
+});
+```
+
+Use `.raw()` to bypass format when needed:
+
+```ts
+const rawUser = await userModel.findFirst().raw();
+// secretField is present, isVerified is original type
+```
+
+### Default Where Conditions
+
+```ts
+const activeUsers = model("user", {
+  where: { isVerified: esc(true) },
+});
+
+// All queries on this model will include the default where clause
+const users = await activeUsers.findMany(); // Only verified users
+```
+
+### Custom Methods
+
+```ts
+const userModel = model("user", {
+  methods: {
+    async byEmail(email: string) {
+      return await userModel.where({ email: esc(email) }).findFirst();
+    },
+  },
+});
+
+// Use the custom method
+const user = await userModel.byEmail("test@example.com");
+```
+
+### Extending Models
+
+```ts
+const extended = userModel.extend({
+  methods: {
+    async adults() {
+      return await userModel.where({ age: esc.gte(18) }).findMany();
+    },
+  },
+});
+
+const adults = await extended.adults();
+```
+
+<Note>
+When method names conflict during `extend`, existing runtime methods take precedence over newly passed ones.
+</Note>
+
+## Error-Safe Execution
+
+Use `.safe()` when you prefer a result object instead of throw/reject behavior:
+
+```ts
+const result = await userModel.findMany().safe();
+
+if (result.error) {
+  console.error(result.error);
+} else {
+  console.log(result.data);
+}
+```
+
+Shape:
+
+```ts
+type SafeResult<T> =
+  | { data: T; error: undefined }
+  | { data: undefined; error: unknown };
+```
+
+## Performance Considerations
+
+### Relation Loading
+
+<Tip>
+**No N+1 queries** — `.with()` uses JOIN-based loading, not separate queries per row.
+</Tip>
+
+```ts
+// ✅ Good: selective loading
+const users = await userModel
+  .findMany()
+  .with({ posts: true })
+  .select({ id: true, name: true });
+
+// ⚠️ Careful: deep nesting + all columns
+const users = await userModel
+  .findMany()
+  .with({
+    posts: {
+      comments: {
+        author: true,
+      },
+    },
+  });
+// This works, but generates a large query with many JOINs
+```
+
+### Optimization Tips
+
+- Use `.select()` to fetch only needed columns
+- Use `.count()` instead of `.findMany()` when you only need the count
+- Add indexes on columns used in `.where()` conditions
+- Use `.raw()` to skip formatting when performance is critical
+
+## Return Value Nullability
+
+- `.findFirst()` → `T | undefined`
+- `.findMany()` → `T[]` (empty array if no matches)
+- `.returnFirst()` → `T | undefined`
+- `.return()` → `T[]` (empty array if no rows affected)
+- `.count()` → `number` (0 if no matches)
+
+```ts
+const user = await userModel.where({ id: esc(999) }).findFirst();
+// user is `undefined` if no row matches
+
+const updated = await userModel
+  .where({ id: esc(999) })
+  .update({ name: "New" })
+  .returnFirst();
+// updated is `undefined` if no row was updated
+```
+
+## Complete API Reference
+
+### Intent Stage
+
+- `where(value)` — filter conditions
+- `insert(value)` — insert new rows
+- `update(value)` — update existing rows
+- `delete()` — delete rows
+- `upsert(value)` — insert or update
+
+### Execution Stage
+
+**Queries:**
+- `findMany()` — fetch multiple rows
+- `findFirst()` — fetch first matching row
+- `count()` — count matching rows
+
+**Mutations:**
+- `.return()` — return all affected rows
+- `.returnFirst()` — return first affected row
+- (no return chain) — execute without returning rows
+
+### Refinement Stage
+
+- `.with(relations)` — load related entities via JOINs
+- `.select(fields)` — SQL SELECT whitelist
+- `.exclude(fields)` — SQL SELECT blacklist
+
+### Programmatic Stage
+
+- `.omit(fields)` — remove fields from result after query
+- `.raw()` — skip format function
+- `.safe()` — wrap in `{ data, error }`
+- `.debug()` — inspect query state
+
+### Model-level Utilities
+
+- `include(value)` — specify nested relations for model instances in `.with()`
+- `extend(options)` — create extended model with additional methods
+- `db(dbInstance)` — bind model to different db/transaction instance
+
+## Comparison: With vs Without drizzle-model
+
+**Without drizzle-model:**
+```ts
+import { eq } from "drizzle-orm";
+
+await db
+  .select()
+  .from(schema.user)
+  .where(eq(schema.user.id, 1));
+```
+
+**With drizzle-model:**
+```ts
+await userModel.where({ id: esc(1) }).findFirst();
+```
+
+The difference becomes more apparent with:
+- Consistent formatting across queries
+- Reusable where conditions
+- Nested relation loading
+- Custom business logic methods
+
+## Troubleshooting
+
+### `safe()` returns `{ data: undefined, error }`
+
+The underlying operation throws. Re-run without `.safe()` to inspect the raw stack.
+
+### `.return()` result shape surprises
+
+- `.return()` => array
+- `.returnFirst()` => single object
+- no return chain => dialect/default execution behavior
+
+### Relation loading with `.with(...)`
+
+Ensure relation metadata is defined with Drizzle `defineRelations` and passed to `modelBuilder({ relations })`.

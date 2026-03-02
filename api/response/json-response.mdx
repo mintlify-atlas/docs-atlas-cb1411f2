@@ -1,0 +1,227 @@
+---
+title: JsonResponse
+description: Type-safe JSON response class with automatic serialization
+---
+
+The `JsonResponse` class extends the standard `Response` class to provide type-safe JSON responses with automatic serialization and output tracking.
+
+## JsonResponse.Base
+
+A type-safe JSON response class that extends the native `Response` class.
+
+```typescript
+import { JsonResponse } from '@apisr/response';
+
+const response = new JsonResponse.Base(
+  JSON.stringify({ message: 'Success' }),
+  {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+    output: { message: 'Success' }
+  }
+);
+```
+
+### Constructor Parameters
+
+<ParamField path="body" type="BodyInit | null" required>
+  The response body (typically a JSON-stringified object)
+</ParamField>
+
+<ParamField path="init" type="ResponseInit & { output: TOutput }">
+  Response initialization options
+  
+  - `status` - HTTP status code (default: 200)
+  - `statusText` - HTTP status text
+  - `headers` - HTTP headers
+  - `output` - Typed output object for type-safe access
+</ParamField>
+
+### Properties
+
+<ParamField path="output" type="TOutput | undefined" readonly>
+  The typed output object that was passed during construction. This allows type-safe access to the response data without re-parsing the JSON.
+</ParamField>
+
+### Methods
+
+#### json()
+
+Overrides the standard `Response.json()` method to provide typed JSON parsing.
+
+```typescript
+const data = await response.json();
+// data is typed as TOutput
+```
+
+**Returns:** `Promise<TOutput>` - Typed JSON data
+
+## JsonResponse.Options
+
+Type alias for response initialization options.
+
+```typescript
+interface Options {
+  headers?: HeadersInput;
+  status?: number;
+  statusText?: string;
+}
+```
+
+## Usage with ResponseHandler
+
+The preferred way to create JSON responses is through `ResponseHandler.json()`:
+
+```typescript
+import { createResponseHandler } from '@apisr/response';
+
+const handler = createResponseHandler({});
+
+const response = handler.json(
+  { users: [{ id: 1, name: 'Alice' }] },
+  { status: 200 }
+);
+
+// Type-safe access to output
+const output = response.output;
+// output is typed as { users: Array<{ id: number, name: string }> }
+```
+
+## Custom Data Mapping
+
+You can configure how input data is mapped to the response output:
+
+```typescript
+import { createResponseHandler, options } from '@apisr/response';
+
+const handler = createResponseHandler((opts) => ({
+  json: opts.json({
+    mapData: (data) => ({
+      data,
+      success: true,
+      timestamp: Date.now()
+    })
+  })
+}));
+
+const response = handler.json({ message: 'Hello' });
+
+// Response body will be:
+// {
+//   "data": { "message": "Hello" },
+//   "success": true,
+//   "timestamp": 1234567890
+// }
+```
+
+## Default Output Schema
+
+The default output schema when using `JsonResponse.defaultOnDataOutput`:
+
+```typescript
+interface DefaultSchema {
+  data: Record<string, any>;
+  success: boolean;
+}
+```
+
+### Example
+
+```typescript
+import { JsonResponse } from '@apisr/response';
+
+const input = { message: 'Hello', count: 42 };
+const output = JsonResponse.defaultOnDataOutput(input);
+
+// output = {
+//   data: { message: 'Hello', count: 42 },
+//   success: true
+// }
+```
+
+## Type Safety Benefits
+
+```typescript
+import { createResponseHandler } from '@apisr/response';
+
+const handler = createResponseHandler({});
+
+interface User {
+  id: number;
+  name: string;
+  email: string;
+}
+
+export const GET = async () => {
+  const users: User[] = await db.users.findMany();
+  
+  const response = handler.json({ users });
+  
+  // TypeScript knows the exact shape of output
+  const output = response.output;
+  // output: { users: User[] }
+  
+  return response;
+};
+```
+
+## Custom Headers
+
+Add custom headers to JSON responses:
+
+```typescript
+const response = handler.json(
+  { message: 'Success' },
+  {
+    status: 201,
+    headers: {
+      'X-Custom-Header': 'value',
+      'Cache-Control': 'no-cache'
+    }
+  }
+);
+```
+
+## Integration with Frameworks
+
+### Next.js App Router
+
+```typescript
+import { createResponseHandler } from '@apisr/response';
+
+const handler = createResponseHandler({});
+
+export async function GET() {
+  const data = { message: 'Hello from Next.js' };
+  return handler.json(data);
+}
+```
+
+### Hono
+
+```typescript
+import { Hono } from 'hono';
+import { createResponseHandler } from '@apisr/response';
+
+const app = new Hono();
+const handler = createResponseHandler({});
+
+app.get('/api/users', async (c) => {
+  const users = await db.users.findMany();
+  return handler.json({ users });
+});
+```
+
+### SvelteKit
+
+```typescript
+import type { RequestHandler } from './$types';
+import { createResponseHandler } from '@apisr/response';
+
+const handler = createResponseHandler({});
+
+export const GET: RequestHandler = async () => {
+  const data = { message: 'Hello from SvelteKit' };
+  return handler.json(data);
+};
+```

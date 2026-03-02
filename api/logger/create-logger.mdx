@@ -1,0 +1,288 @@
+---
+title: createLogger
+description: Create a logger instance with custom transports and configuration
+---
+
+## createLogger
+
+Creates a logger instance with custom transports and configuration options.
+
+```typescript
+import { createLogger } from '@daytona/logger';
+```
+
+### Signature
+
+```typescript
+function createLogger<
+  TTransports extends Record<string, AnyTransport>,
+  TOptions extends LoggerOptions<TTransports>
+>(options: TOptions): Logger<TOptions>
+```
+
+### Parameters
+
+<ParamField path="options" type="LoggerOptions<TTransports>" required>
+  Configuration options for the logger
+
+  <ParamField path="options.transports" type="Record<string, AnyTransport>" required>
+    A record of named transports that define where and how logs are output
+  </ParamField>
+
+  <ParamField path="options.name" type="string">
+    Optional name for the logger instance
+  </ParamField>
+
+  <ParamField path="options.autoFlush" type="LoggerAutoFlushOptions">
+    Configuration for automatic log flushing
+
+    <ParamField path="options.autoFlush.intervalMs" type="number">
+      Interval in milliseconds for automatic flushing. Set to a positive number to enable periodic flushing.
+    </ParamField>
+
+    <ParamField path="options.autoFlush.on" type="LoggerAutoFlushEvent[]">
+      Array of process events that should trigger a flush. Valid values: `"beforeExit"`, `"SIGINT"`, `"SIGTERM"`
+    </ParamField>
+  </ParamField>
+</ParamField>
+
+### Returns
+
+A `Logger` instance with the following methods and properties.
+
+### Example
+
+```typescript
+import { createLogger, createTransport } from '@daytona/logger';
+import { createConsole } from '@daytona/logger/transports/console';
+
+const logger = createLogger({
+  name: 'MyApp',
+  transports: {
+    console: createConsole({ mode: 'pretty' })
+  },
+  autoFlush: {
+    intervalMs: 5000,
+    on: ['beforeExit', 'SIGTERM']
+  }
+});
+
+logger.info('Application started');
+logger.error('Something went wrong', { code: 500 });
+```
+
+## Logger Interface
+
+The logger instance returned by `createLogger` implements the following interface:
+
+### Logging Methods
+
+#### debug
+
+```typescript
+debug(message: string, data?: Record<string, unknown>): void
+```
+
+Log a debug message with optional additional data.
+
+<ParamField path="message" type="string" required>
+  The debug message to log
+</ParamField>
+
+<ParamField path="data" type="Record<string, unknown>">
+  Optional additional data to include with the log
+</ParamField>
+
+**Example:**
+```typescript
+logger.debug('Processing request', { requestId: '123' });
+```
+
+#### info
+
+```typescript
+info(message: string, data?: Record<string, unknown>): void
+```
+
+Log an informational message with optional additional data.
+
+<ParamField path="message" type="string" required>
+  The info message to log
+</ParamField>
+
+<ParamField path="data" type="Record<string, unknown>">
+  Optional additional data to include with the log
+</ParamField>
+
+**Example:**
+```typescript
+logger.info('User logged in', { userId: '456' });
+```
+
+#### warn
+
+```typescript
+warn(message: string, data?: Record<string, unknown>): void
+```
+
+Log a warning message with optional additional data.
+
+<ParamField path="message" type="string" required>
+  The warning message to log
+</ParamField>
+
+<ParamField path="data" type="Record<string, unknown>">
+  Optional additional data to include with the log
+</ParamField>
+
+**Example:**
+```typescript
+logger.warn('API rate limit approaching', { remaining: 10 });
+```
+
+#### error
+
+```typescript
+error(message: string | Error, data?: Record<string, unknown>): void
+```
+
+Log an error message or Error object with optional additional data. When an Error object is passed, the stack trace and error name are automatically included in the log data.
+
+<ParamField path="message" type="string | Error" required>
+  The error message or Error object to log
+</ParamField>
+
+<ParamField path="data" type="Record<string, unknown>">
+  Optional additional data to include with the log
+</ParamField>
+
+**Example:**
+```typescript
+// Log error message
+logger.error('Database connection failed', { host: 'localhost' });
+
+// Log Error object
+try {
+  throw new Error('Invalid input');
+} catch (err) {
+  logger.error(err, { input: 'foo' });
+}
+```
+
+### Utility Methods
+
+#### to
+
+```typescript
+to(
+  transportName: keyof TOptions["transports"] | (keyof TOptions["transports"])[]
+): Logger<TOptions>
+```
+
+Create a logger instance that only logs to specific transport(s). Useful for routing different log types to different destinations.
+
+<ParamField path="transportName" type="string | string[]" required>
+  Name(s) of the transport(s) to use. Can be a single transport name or an array of names.
+</ParamField>
+
+**Example:**
+```typescript
+const logger = createLogger({
+  transports: {
+    console: createConsole({ mode: 'pretty' }),
+    file: createFileTransport({ path: 'logs.txt' })
+  }
+});
+
+// Only log to file
+logger.to('file').info('Saved to file only');
+
+// Log to both console and file
+logger.to(['console', 'file']).error('Error in both outputs');
+```
+
+#### flush
+
+```typescript
+flush(): Promise<void>
+```
+
+Manually flush all pending logs to their transports. This calls the `flush` function on each transport that implements it.
+
+**Example:**
+```typescript
+logger.info('Important message');
+await logger.flush();
+// Logs are now guaranteed to be processed
+```
+
+#### extend
+
+```typescript
+extend(
+  options: LoggerExtendOptions<TOptions["transports"]>
+): Logger<TOptions>
+```
+
+Create a new logger instance based on the current logger, with the ability to exclude or modify transports.
+
+<ParamField path="options" type="LoggerExtendOptions" required>
+  Options for extending the logger
+
+  <ParamField path="options.name" type="string">
+    Optional new name for the extended logger
+  </ParamField>
+
+  <ParamField path="options.excludeTransport" type="string[]">
+    Array of transport names to exclude from the extended logger
+  </ParamField>
+
+  <ParamField path="options.mapTransport" type="function">
+    Function to transform transports. Receives `{ name, transport }` and returns a modified transport.
+  </ParamField>
+</ParamField>
+
+**Example:**
+```typescript
+const baseLogger = createLogger({
+  name: 'Base',
+  transports: {
+    console: createConsole({ mode: 'pretty' }),
+    file: createFileTransport({ path: 'logs.txt' })
+  }
+});
+
+// Create logger without file transport
+const consoleOnlyLogger = baseLogger.extend({
+  name: 'ConsoleOnly',
+  excludeTransport: ['file']
+});
+
+// Create logger with modified transports
+const modifiedLogger = baseLogger.extend({
+  mapTransport: ({ name, transport }) => {
+    // Wrap the log function
+    return createTransport({
+      log: (ctx) => {
+        console.log(`[${name}]`);
+        transport.log(ctx);
+      }
+    });
+  }
+});
+```
+
+## Type Definitions
+
+```typescript
+type LogLevels = "info" | "debug" | "error" | "warn";
+
+type LoggerAutoFlushEvent = "beforeExit" | "SIGINT" | "SIGTERM";
+
+interface Log {
+  data: Record<string, unknown>;
+  level: LogLevels;
+  message: string;
+  timestamp: number;
+}
+```

@@ -1,0 +1,200 @@
+---
+title: Type Inference
+description: Type utilities for inferring TypeScript types from schemas
+---
+
+## Overview
+
+The `@apisr/schema` package provides type utilities that help you infer TypeScript types from Zod schemas, making your code type-safe and reducing duplication.
+
+## Type Utilities
+
+### Infer
+
+Infers the output type of a schema.
+
+```typescript
+type Infer<TSchema extends Schema> = z.infer<TSchema>
+```
+
+#### Example
+
+```typescript
+import type { Infer } from "@apisr/schema";
+import { z } from "@apisr/zod";
+
+const userSchema = z.object({
+  name: z.string(),
+  age: z.number(),
+  email: z.string().email(),
+});
+
+type User = Infer<typeof userSchema>;
+// Equivalent to:
+// type User = {
+//   name: string;
+//   age: number;
+//   email: string;
+// }
+
+function processUser(user: User) {
+  console.log(user.name);
+}
+```
+
+### InferOr
+
+Infers the type from a schema, or falls back to a default type if the schema doesn't resolve to a record.
+
+```typescript
+type InferOr<TSchema extends Schema, TOr> =
+  Infer<TSchema> extends Record<string, any> ? Infer<TSchema> : TOr
+```
+
+#### Example
+
+```typescript
+import type { InferOr } from "@apisr/schema";
+import { z } from "@apisr/zod";
+
+const objectSchema = z.object({ name: z.string() });
+const stringSchema = z.string();
+
+type Type1 = InferOr<typeof objectSchema, never>;
+// { name: string }
+
+type Type2 = InferOr<typeof stringSchema, { default: true }>;
+// { default: true } (fallback used because z.string() is not a Record)
+```
+
+### InferUndefined
+
+Infers the type from a schema that might be undefined, excluding the undefined case.
+
+```typescript
+type InferUndefined<TSchema extends Schema | undefined> =
+  TSchema extends undefined ? never : Infer<Exclude<TSchema, undefined>>
+```
+
+#### Example
+
+```typescript
+import type { InferUndefined } from "@apisr/schema";
+import { z } from "@apisr/zod";
+
+const schema = z.object({ name: z.string() });
+
+type MaybeSchema = typeof schema | undefined;
+
+type Resolved = InferUndefined<MaybeSchema>;
+// { name: string } (undefined case is excluded)
+
+type NeverType = InferUndefined<undefined>;
+// never
+```
+
+### ExtractSchema
+
+Extracts the `schema` property from an object type.
+
+```typescript
+type ExtractSchema<From extends Record<string, any> | undefined> =
+  Exclude<From, undefined>["schema"]
+```
+
+#### Example
+
+```typescript
+import type { ExtractSchema } from "@apisr/schema";
+
+interface HandlerOptions {
+  schema: z.ZodObject<{ name: z.ZodString }>;
+  other: string;
+}
+
+type Schema = ExtractSchema<HandlerOptions>;
+// z.ZodObject<{ name: z.ZodString }>
+```
+
+### ExtractSchemaFromKey
+
+Extracts a specific key from an object type.
+
+```typescript
+type ExtractSchemaFromKey<
+  From extends Record<string, any> | undefined,
+  Key extends string
+> = Exclude<From, undefined>[Key]
+```
+
+#### Example
+
+```typescript
+import type { ExtractSchemaFromKey } from "@apisr/schema";
+
+interface Config {
+  payload: z.ZodObject<{ id: z.ZodString }>;
+  response: z.ZodObject<{ success: z.ZodBoolean }>;
+}
+
+type PayloadSchema = ExtractSchemaFromKey<Config, "payload">;
+// z.ZodObject<{ id: z.ZodString }>
+
+type ResponseSchema = ExtractSchemaFromKey<Config, "response">;
+// z.ZodObject<{ success: z.ZodBoolean }>
+```
+
+## Practical Example
+
+Here's how these types work together in a real-world scenario:
+
+```typescript
+import type { Infer, ExtractSchema } from "@apisr/schema";
+import { z } from "@apisr/zod";
+import { handler } from "@apisr/core";
+
+const createUserPayload = z.object({
+  username: z.string().from("body"),
+  email: z.string().email().from("body"),
+  role: z.enum(["admin", "user"]).from("body"),
+});
+
+const createUserResponse = z.object({
+  id: z.string(),
+  username: z.string(),
+  email: z.string(),
+  createdAt: z.date(),
+});
+
+// Infer types from schemas
+type CreateUserPayload = Infer<typeof createUserPayload>;
+type CreateUserResponse = Infer<typeof createUserResponse>;
+
+// Use in handler
+const createUserHandler = handler(
+  async ({ payload }): Promise<CreateUserResponse> => {
+    // payload is fully typed as CreateUserPayload
+    const user = await db.users.create({
+      username: payload.username,
+      email: payload.email,
+      role: payload.role,
+    });
+
+    return {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      createdAt: user.createdAt,
+    };
+  },
+  {
+    payload: createUserPayload,
+    response: createUserResponse,
+  }
+);
+```
+
+## Related
+
+- [checkSchema](/api/schema/check-schema)
+- [Zod Utilities](/api/zod/utilities)

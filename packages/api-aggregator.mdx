@@ -1,0 +1,231 @@
+---
+title: '@apisr/api-aggregator'
+description: 'API aggregation and orchestration package for building and testing API endpoints'
+---
+
+## Overview
+
+The `@apisr/api-aggregator` package provides utilities for aggregating and orchestrating multiple API endpoints into a cohesive configuration. It includes type-safe endpoint definitions, schema validation, and HTTP client integration using [ky](https://github.com/sindresorhus/ky).
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @apisr/api-aggregator
+```
+
+```bash yarn
+yarn add @apisr/api-aggregator
+```
+
+```bash pnpm
+pnpm add @apisr/api-aggregator
+```
+
+```bash bun
+bun add @apisr/api-aggregator
+```
+</CodeGroup>
+
+## Exports
+
+The package exports the following functions and types:
+
+- `aggregate(config: Config)` - Main aggregation function
+- `endpoint()` - Helper for defining type-safe endpoints
+- Type exports: `Config`, `Endpoint`, `Methods`, `ResponseStatus`, `ProbeFactory`
+
+## Core Concepts
+
+### Endpoint Definition
+
+Endpoints are the building blocks of your API configuration. Each endpoint defines:
+
+- **Path**: The URL path (supports params like `:id`)
+- **Method**: HTTP method (GET, POST, PUT, DELETE, PATCH, OPTIONS)
+- **Schemas**: Request/response validation schemas
+- **Probes**: Test data for different response scenarios
+
+### Configuration
+
+The `Config` interface defines the overall API setup:
+
+```typescript
+interface Config {
+  baseUrl: string;
+  endpoints: Endpoint[];
+  format?: "json"; // default: "json"
+  headers?: Record<string, string>;
+  outDir?: string; // default: "./.openapi"
+}
+```
+
+## Usage
+
+### Defining Endpoints
+
+Use the `endpoint()` helper to create type-safe endpoint definitions:
+
+```typescript
+import { endpoint } from '@apisr/api-aggregator';
+import { z } from '@apisr/zod';
+
+const getUserEndpoint = endpoint({
+  path: '/users/:id',
+  method: 'GET',
+  summary: 'Get user by ID',
+  operationId: 'getUser',
+  
+  // Define schemas for different parts of the request
+  paramsSchema: z.object({
+    id: z.string(),
+  }),
+  
+  querySchema: z.object({
+    include: z.array(z.string()).optional(),
+  }),
+  
+  headersSchema: z.object({
+    authorization: z.string(),
+  }),
+});
+```
+
+### Creating API Configuration
+
+```typescript
+import { aggregate } from '@apisr/api-aggregator';
+
+const config = {
+  baseUrl: 'https://api.example.com',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  endpoints: [
+    getUserEndpoint,
+    // ... more endpoints
+  ],
+  outDir: './generated/openapi',
+};
+
+const api = aggregate(config);
+```
+
+### Using Probes for Testing
+
+Probes allow you to define test data for different response scenarios:
+
+```typescript
+const createUserEndpoint = endpoint({
+  path: '/users',
+  method: 'POST',
+  bodySchema: z.object({
+    name: z.string(),
+    email: z.string().email(),
+  }),
+  
+  probe: {
+    200: {
+      body: {
+        name: 'John Doe',
+        email: 'john@example.com',
+      },
+    },
+    400: {
+      body: {
+        name: '',  // Invalid: empty name
+        email: 'invalid-email',
+      },
+    },
+  },
+});
+```
+
+### Advanced: Factory Functions
+
+For dynamic test data, use probe factories:
+
+```typescript
+const endpoint = endpoint({
+  path: '/users',
+  method: 'POST',
+  bodySchema: z.object({
+    name: z.string(),
+    email: z.string().email(),
+  }),
+  
+  probe: {
+    200: {
+      body: ({ faker }) => ({
+        name: faker.person.fullName(),
+        email: faker.internet.email(),
+      }),
+    },
+  },
+});
+```
+
+## Type Utilities
+
+### Automatic Path Parameter Extraction
+
+The package automatically extracts typed path parameters from endpoint paths:
+
+```typescript
+// Path: "/users/:userId/posts/:postId"
+// Automatically infers: { userId: string, postId: string }
+
+const endpoint = endpoint({
+  path: '/users/:userId/posts/:postId',
+  method: 'GET',
+  // paramsSchema must match the extracted params
+});
+```
+
+## HTTP Methods
+
+Supported HTTP methods:
+
+<CardGroup cols={3}>
+  <Card title="GET" icon="arrow-down">
+    Retrieve resources
+  </Card>
+  <Card title="POST" icon="plus">
+    Create resources
+  </Card>
+  <Card title="PUT" icon="pen">
+    Replace resources
+  </Card>
+  <Card title="PATCH" icon="pen-to-square">
+    Update resources
+  </Card>
+  <Card title="DELETE" icon="trash">
+    Remove resources
+  </Card>
+  <Card title="OPTIONS" icon="gear">
+    Get supported methods
+  </Card>
+</CardGroup>
+
+## Response Status Codes
+
+Currently supports defining probes for:
+
+- `200` - Success
+- `400` - Bad Request
+- Custom status codes (as strings or numbers)
+
+<Tip>
+The probe system allows you to define test scenarios for any HTTP status code, making it easy to test error handling and edge cases.
+</Tip>
+
+## Related Packages
+
+<CardGroup cols={2}>
+  <Card title="@apisr/zod" href="/packages/zod" icon="shield-check">
+    Extended Zod validation with request source mapping
+  </Card>
+  <Card title="@apisr/schema" href="/packages/schema" icon="code">
+    Core schema types and utilities
+  </Card>
+</CardGroup>

@@ -1,0 +1,553 @@
+---
+title: "Refinement Methods"
+description: "Shape query results and control data formatting with select, exclude, with, omit, raw, and safe."
+---
+
+## Overview
+
+Refinement methods control how query results are shaped and formatted. Some operate at the SQL level (`.select()`, `.exclude()`, `.with()`), while others transform results programmatically (`.omit()`, `.raw()`, `.safe()`).
+
+## SQL-Level Refinement
+
+### select
+
+Specify which columns to include in the SQL SELECT clause (whitelist).
+
+#### Syntax
+
+```ts
+query.select(fields) => ModelQueryResult
+```
+
+#### Parameters
+
+<ParamField path="fields" type="Record<string, boolean | SelectObject>" required>
+  Object mapping field names to `true` (include) or nested select objects for relations.
+</ParamField>
+
+#### Examples
+
+<Tabs>
+  <Tab title="Basic Select">
+    ```ts
+    const users = await userModel
+      .findMany()
+      .select({ id: true, name: true });
+    // SELECT id, name FROM user
+    // Type: { id: number, name: string }[]
+    ```
+  </Tab>
+  
+  <Tab title="Nested Select">
+    ```ts
+    const users = await userModel
+      .findMany()
+      .with({ posts: true })
+      .select({ 
+        id: true, 
+        name: true,
+        posts: { 
+          id: true, 
+          title: true 
+        }
+      });
+    // Selects specific fields from user and posts
+    ```
+  </Tab>
+  
+  <Tab title="Combine with Exclude">
+    ```ts
+    const users = await userModel
+      .findMany()
+      .select({ id: true, name: true, email: true })
+      .exclude({ email: true });
+    // Final result: { id: true, name: true }
+    ```
+  </Tab>
+</Tabs>
+
+### exclude
+
+Specify which columns to exclude from the SQL SELECT clause (blacklist).
+
+#### Syntax
+
+```ts
+query.exclude(fields) => ModelQueryResult
+```
+
+#### Parameters
+
+<ParamField path="fields" type="Record<string, boolean | ExcludeObject>" required>
+  Object mapping field names to `true` (exclude) or nested exclude objects for relations.
+</ParamField>
+
+#### Examples
+
+<Tabs>
+  <Tab title="Basic Exclude">
+    ```ts
+    const users = await userModel
+      .findMany()
+      .exclude({ password: true, secretField: true });
+    // SELECT * EXCEPT password, secretField FROM user
+    ```
+  </Tab>
+  
+  <Tab title="Nested Exclude">
+    ```ts
+    const users = await userModel
+      .findMany()
+      .with({ posts: true })
+      .exclude({ 
+        email: true,
+        posts: { 
+          internalStatus: true 
+        }
+      });
+    ```
+  </Tab>
+</Tabs>
+
+### with
+
+Load related entities via JOINs (eager loading).
+
+#### Syntax
+
+```ts
+query.with(relations) => ModelQueryResult
+```
+
+#### Parameters
+
+<ParamField path="relations" type="Record<string, boolean | Model | WithObject>" required>
+  Object mapping relation names to:
+  - `true` - Load all fields from the relation
+  - Model instance - Load with filters via `.where()`
+  - Nested object - Load nested relations
+</ParamField>
+
+#### Examples
+
+<Tabs>
+  <Tab title="Load Single Relation">
+    ```ts
+    const users = await userModel
+      .findMany()
+      .with({ posts: true });
+    // Each user includes posts array
+    ```
+  </Tab>
+  
+  <Tab title="Load Multiple Relations">
+    ```ts
+    const users = await userModel
+      .findMany()
+      .with({ 
+        posts: true, 
+        invitee: true,
+        profile: true
+      });
+    ```
+  </Tab>
+  
+  <Tab title="Nested Relations">
+    ```ts
+    const users = await userModel
+      .findMany()
+      .with({
+        posts: {
+          comments: true
+        }
+      });
+    // Loads users → posts → comments
+    ```
+  </Tab>
+  
+  <Tab title="Deep Nesting">
+    ```ts
+    const users = await userModel
+      .findMany()
+      .with({
+        posts: {
+          comments: {
+            author: true
+          }
+        }
+      });
+    // Three levels deep
+    ```
+  </Tab>
+  
+  <Tab title="Filtered Relations">
+    ```ts
+    const users = await userModel
+      .findMany()
+      .with({
+        posts: postModel.where({
+          published: esc(true)
+        })
+      });
+    // Only load published posts
+    ```
+  </Tab>
+  
+  <Tab title="Filtered + Nested">
+    ```ts
+    const users = await userModel
+      .findMany()
+      .with({
+        posts: postModel
+          .where({ published: esc(true) })
+          .include({ comments: true })
+      });
+    // Load published posts WITH their comments
+    ```
+  </Tab>
+</Tabs>
+
+### include
+
+Specify nested relations when using a model instance in `.with()`.
+
+#### Syntax
+
+```ts
+model.include(relations) => Model
+```
+
+#### Parameters
+
+<ParamField path="relations" type="Record<string, boolean | Model | WithObject>" required>
+  Same format as `.with()` - specifies which nested relations to load.
+</ParamField>
+
+#### Why It Exists
+
+When you use `.where()` on a model and pass it to `.with()`, you need a way to also load nested relations. `.include()` enables this:
+
+```ts
+// ❌ Without .include() - can only filter, not load nested relations
+const users = await userModel.findMany().with({
+  posts: postModel.where({ published: esc(true) })
+  // Can't specify comments here
+});
+
+// ✅ With .include() - filter AND load nested relations
+const users = await userModel.findMany().with({
+  posts: postModel
+    .where({ published: esc(true) })
+    .include({ comments: true })
+});
+```
+
+#### Examples
+
+<Tabs>
+  <Tab title="Basic Include">
+    ```ts
+    const users = await userModel.findMany().with({
+      posts: postModel
+        .where({ published: esc(true) })
+        .include({ comments: true })
+    });
+    ```
+  </Tab>
+  
+  <Tab title="Multiple Includes">
+    ```ts
+    const users = await userModel.findMany().with({
+      posts: postModel
+        .where({ published: esc(true) })
+        .include({ 
+          comments: true,
+          tags: true
+        })
+    });
+    ```
+  </Tab>
+  
+  <Tab title="Nested Include">
+    ```ts
+    const users = await userModel.findMany().with({
+      posts: postModel
+        .where({ published: esc(true) })
+        .include({ 
+          comments: commentModel.include({ author: true })
+        })
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Programmatic Refinement
+
+These methods transform results AFTER the query executes (not in SQL).
+
+### omit
+
+Remove fields from the result object programmatically.
+
+#### Syntax
+
+```ts
+result.omit(fields) => ModelMutateResult
+```
+
+#### Parameters
+
+<ParamField path="fields" type="Record<string, boolean>" required>
+  Object mapping field names to `true` (remove).
+</ParamField>
+
+#### When to Use
+
+- `.exclude()` - SQL-level (doesn't fetch the data)
+- `.omit()` - Programmatic (fetches data, then removes it)
+
+Use `.omit()` when:
+- You need the data for processing but want to hide it from the final result
+- Working with mutations (`.returnFirst().omit(...)`)
+
+#### Examples
+
+<Tabs>
+  <Tab title="Basic Omit">
+    ```ts
+    const user = await userModel
+      .where({ id: esc(1) })
+      .update({ secretField: "new-value" })
+      .returnFirst()
+      .omit({ secretField: true, password: true });
+    // secretField and password are excluded from result
+    ```
+  </Tab>
+  
+  <Tab title="Multiple Fields">
+    ```ts
+    const users = await userModel
+      .insert([...])
+      .return()
+      .omit({ 
+        password: true, 
+        secretToken: true,
+        internalStatus: true
+      });
+    ```
+  </Tab>
+</Tabs>
+
+### raw
+
+Skip the model's `format` function and return raw database results.
+
+#### Syntax
+
+```ts
+query.raw() => ModelQueryResult
+```
+
+#### When to Use
+
+- Performance-critical paths where formatting overhead matters
+- When you need original database types (e.g., before date parsing)
+- Debugging to see raw database output
+
+#### Examples
+
+<Tabs>
+  <Tab title="Skip Formatting">
+    ```ts
+    const postModel = model("post", {
+      format(row) {
+        return {
+          ...row,
+          createdAt: new Date(row.createdAt), // Parse dates
+        };
+      },
+    });
+    
+    const post = await postModel.findFirst().raw();
+    // post.createdAt is string (raw DB value), not Date
+    ```
+  </Tab>
+  
+  <Tab title="Performance">
+    ```ts
+    // Format function has expensive transformations
+    const users = await userModel
+      .findMany()
+      .raw(); // Skip formatting for speed
+    ```
+  </Tab>
+</Tabs>
+
+### safe
+
+Wrap the result in `{ data, error }` instead of throwing errors.
+
+#### Syntax
+
+```ts
+query.safe() => Promise<SafeResult<T>>
+```
+
+#### Return Type
+
+```ts
+type SafeResult<T> = 
+  | { data: T; error: undefined }
+  | { data: undefined; error: unknown };
+```
+
+#### When to Use
+
+- You prefer error-as-value patterns over try-catch
+- Building APIs that need consistent error responses
+- Functional programming style
+
+#### Examples
+
+<Tabs>
+  <Tab title="Basic Safe">
+    ```ts
+    const result = await userModel.findMany().safe();
+    
+    if (result.error) {
+      console.error("Failed to fetch users:", result.error);
+      return;
+    }
+    
+    console.log(result.data); // User[]
+    ```
+  </Tab>
+  
+  <Tab title="With Mutations">
+    ```ts
+    const result = await userModel
+      .insert({ ... })
+      .returnFirst()
+      .safe();
+    
+    if (result.error) {
+      return { success: false, error: result.error };
+    }
+    
+    return { success: true, user: result.data };
+    ```
+  </Tab>
+  
+  <Tab title="Error Handling">
+    ```ts
+    const result = await userModel
+      .where({ id: esc(999) })
+      .findFirst()
+      .safe();
+    
+    if (result.error) {
+      // Database error occurred
+      logError(result.error);
+    } else if (!result.data) {
+      // No user found (not an error)
+      console.log("User not found");
+    } else {
+      // Success
+      console.log(result.data.name);
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Chaining Refinements
+
+All refinement methods can be chained together:
+
+```ts
+const users = await userModel
+  .where({ isVerified: esc(true) })
+  .findMany()
+  .with({ posts: true })
+  .select({ id: true, name: true, posts: { title: true } })
+  .exclude({ email: true })
+  .raw()
+  .safe();
+```
+
+## Performance Considerations
+
+### SQL-Level (Efficient)
+
+```ts
+// ✅ Only fetches needed columns
+const users = await userModel
+  .findMany()
+  .select({ id: true, name: true });
+// SQL: SELECT id, name FROM user
+```
+
+### Programmatic (Less Efficient)
+
+```ts
+// ⚠️ Fetches all columns, then removes them
+const users = await userModel
+  .findMany()
+  .omit({ email: true, password: true });
+// SQL: SELECT * FROM user (then omit in JavaScript)
+```
+
+### Relation Loading
+
+```ts
+// ✅ Single query with JOIN
+const users = await userModel
+  .findMany()
+  .with({ posts: true });
+// Uses efficient JOIN strategy, not N+1 queries
+```
+
+## Type Safety
+
+All refinement methods update the result type:
+
+```ts
+const user = await userModel
+  .findFirst()
+  .select({ id: true, name: true });
+// Type: { id: number, name: string } | undefined
+
+const users = await userModel
+  .findMany()
+  .with({ posts: true });
+// Type: { ...User, posts: Post[] }[]
+
+const result = await userModel.findMany().safe();
+// Type: { data: User[], error: undefined } | { data: undefined, error: unknown }
+```
+
+## Notes
+
+<Note>
+  **SQL vs Programmatic**: Use `.select()` and `.exclude()` to reduce data transfer. Use `.omit()` only when you need the data for processing but want to hide it from the final result.
+</Note>
+
+<Note>
+  **Relation Loading**: `.with()` uses efficient JOIN-based loading, not N+1 queries.
+</Note>
+
+<Warning>
+  Deep relation nesting can generate large queries. Use `.select()` to reduce payload size:
+  
+  ```ts
+  const users = await userModel
+    .findMany()
+    .with({ posts: { comments: { author: true } } })
+    .select({ 
+      id: true, 
+      posts: { 
+        id: true, 
+        comments: { id: true } 
+      } 
+    });
+  ```
+</Warning>

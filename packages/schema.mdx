@@ -1,0 +1,527 @@
+---
+title: "@apisr/schema"
+description: "Schema validation utilities with Zod integration and multi-source resolution"
+---
+
+## Overview
+
+`@apisr/schema` provides schema validation utilities with:
+
+- **Zod schema validation** with parse and safeParse modes
+- **Multi-source resolution** for request data (params, body, headers, query)
+- **Type inference** from schema definitions
+- **Schema checking utilities** for validation
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @apisr/schema
+```
+
+```bash bun
+bun add @apisr/schema
+```
+
+```bash pnpm
+pnpm add @apisr/schema
+```
+</CodeGroup>
+
+<Note>
+  This package depends on `@apisr/zod` which extends Zod with additional utilities.
+</Note>
+
+## Quick Start
+
+### Basic Schema Validation
+
+```typescript
+import { checkSchema } from "@apisr/schema";
+import { z } from "zod";
+
+const userSchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+  age: z.number().min(0),
+});
+
+// Parse mode (throws on error)
+const user = checkSchema(userSchema, {
+  name: "Alice",
+  email: "alice@example.com",
+  age: 25,
+});
+
+// Safe parse mode (returns null on error)
+const maybeUser = checkSchema(
+  userSchema,
+  { name: "Bob" },
+  { validationType: "safeParse" }
+);
+// maybeUser is null if validation fails
+```
+
+### Type Inference
+
+```typescript
+import { type Infer } from "@apisr/schema";
+import { z } from "zod";
+
+const productSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  price: z.number(),
+  inStock: z.boolean(),
+});
+
+type Product = Infer<typeof productSchema>;
+// type Product = {
+//   id: string;
+//   name: string;
+//   price: number;
+//   inStock: boolean;
+// }
+```
+
+## Core Concepts
+
+### Multi-Source Resolution
+
+Resolve schema fields from multiple request sources:
+
+```typescript
+import { checkSchema } from "@apisr/schema";
+import { z } from "@apisr/zod";
+
+const schema = z.object({
+  userId: z.from("params").string(),
+  name: z.from("body").string(),
+  authorization: z.from("headers").string(),
+  page: z.from("query").number(),
+});
+
+const validated = checkSchema(
+  schema,
+  {}, // Base input (optional)
+  {
+    sources: {
+      params: { userId: "123" },
+      body: { name: "Alice" },
+      headers: { authorization: "Bearer token" },
+      query: { page: "1" },
+    },
+  }
+);
+
+// Result:
+// {
+//   userId: "123",
+//   name: "Alice",
+//   authorization: "Bearer token",
+//   page: 1
+// }
+```
+
+<Note>
+  Source resolution is particularly useful in API handlers where data comes from different parts of the HTTP request.
+</Note>
+
+### Validation Types
+
+<Tabs>
+  <Tab title="parse">
+    ```typescript
+    const result = checkSchema(
+      schema,
+      input,
+      { validationType: "parse" }
+    );
+    ```
+    Throws an error if validation fails. Default mode.
+  </Tab>
+  <Tab title="safeParse">
+    ```typescript
+    const result = checkSchema(
+      schema,
+      input,
+      { validationType: "safeParse" }
+    );
+    ```
+    Returns `null` if validation fails instead of throwing.
+  </Tab>
+</Tabs>
+
+## Type Utilities
+
+### Infer
+
+Infer TypeScript type from schema:
+
+```typescript
+import { type Infer } from "@apisr/schema";
+import { z } from "zod";
+
+const userSchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+});
+
+type User = Infer<typeof userSchema>;
+// type User = { name: string; email: string; }
+```
+
+### InferOr
+
+Infer type with fallback:
+
+```typescript
+import { type InferOr } from "@apisr/schema";
+import { z } from "zod";
+
+const schema = z.string();
+
+type Result = InferOr<typeof schema, { default: "fallback" }>;
+// If schema infers to object: use inferred type
+// Otherwise: use fallback type
+```
+
+### InferUndefined
+
+Infer type from optional schema:
+
+```typescript
+import { type InferUndefined } from "@apisr/schema";
+import { z } from "zod";
+
+const schema = z.object({ name: z.string() });
+const maybeSchema: typeof schema | undefined = schema;
+
+type Result = InferUndefined<typeof maybeSchema>;
+// type Result = { name: string; } (undefined is excluded)
+```
+
+### ExtractSchema
+
+Extract schema from object:
+
+```typescript
+import { type ExtractSchema } from "@apisr/schema";
+
+type WithSchema = { schema: z.ZodString; other: number };
+type Schema = ExtractSchema<WithSchema>;
+// type Schema = z.ZodString
+```
+
+## Schema Checking
+
+### isZodSchema
+
+Check if value is a Zod schema:
+
+```typescript
+import { isZodSchema } from "@apisr/schema";
+import { z } from "zod";
+
+const schema = z.string();
+const notSchema = { type: "string" };
+
+isZodSchema(schema); // true
+isZodSchema(notSchema); // false
+```
+
+## Integration Examples
+
+### API Handler with Multi-Source Validation
+
+```typescript
+import { checkSchema } from "@apisr/schema";
+import { z } from "@apisr/zod";
+
+const updateUserSchema = z.object({
+  // From URL params
+  userId: z.from("params").string().uuid(),
+  
+  // From request body
+  name: z.from("body").string().min(1),
+  email: z.from("body").string().email(),
+  
+  // From query string
+  notify: z.from("query").boolean().optional(),
+  
+  // From headers
+  authorization: z.from("headers").string(),
+});
+
+async function updateUser(request: Request) {
+  const params = await parseParams(request);
+  const body = await request.json();
+  const query = parseQuery(request.url);
+  const headers = Object.fromEntries(request.headers);
+
+  const validated = checkSchema(
+    updateUserSchema,
+    {},
+    {
+      sources: { params, body, query, headers },
+      validationType: "parse",
+    }
+  );
+
+  // validated is fully typed:
+  // {
+  //   userId: string;
+  //   name: string;
+  //   email: string;
+  //   notify?: boolean;
+  //   authorization: string;
+  // }
+
+  return await db.user.update({
+    where: { id: validated.userId },
+    data: {
+      name: validated.name,
+      email: validated.email,
+    },
+  });
+}
+```
+
+### Type-Safe Form Validation
+
+```typescript
+import { checkSchema, type Infer } from "@apisr/schema";
+import { z } from "zod";
+
+const registrationSchema = z.object({
+  username: z.string().min(3).max(20),
+  email: z.string().email(),
+  password: z.string().min(8),
+  confirmPassword: z.string(),
+  terms: z.boolean().refine((val) => val === true, {
+    message: "You must accept the terms",
+  }),
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "Passwords don't match",
+  path: ["confirmPassword"],
+});
+
+type RegistrationForm = Infer<typeof registrationSchema>;
+
+function validateRegistration(formData: unknown): RegistrationForm | null {
+  return checkSchema(
+    registrationSchema,
+    formData,
+    { validationType: "safeParse" }
+  );
+}
+
+// Usage
+const result = validateRegistration({
+  username: "alice",
+  email: "alice@example.com",
+  password: "securepass123",
+  confirmPassword: "securepass123",
+  terms: true,
+});
+
+if (result) {
+  // result is typed as RegistrationForm
+  await createUser(result);
+} else {
+  console.error("Validation failed");
+}
+```
+
+### Nested Schema Validation
+
+```typescript
+import { checkSchema } from "@apisr/schema";
+import { z } from "zod";
+
+const addressSchema = z.object({
+  street: z.string(),
+  city: z.string(),
+  country: z.string(),
+  postalCode: z.string(),
+});
+
+const userSchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+  addresses: z.array(addressSchema),
+  primaryAddress: addressSchema.optional(),
+});
+
+const user = checkSchema(userSchema, {
+  name: "Alice",
+  email: "alice@example.com",
+  addresses: [
+    {
+      street: "123 Main St",
+      city: "New York",
+      country: "USA",
+      postalCode: "10001",
+    },
+  ],
+});
+```
+
+## Advanced Usage
+
+### Custom Validation Messages
+
+```typescript
+import { checkSchema } from "@apisr/schema";
+import { z } from "zod";
+
+const schema = z.object({
+  email: z.string().email("Please provide a valid email address"),
+  age: z.number({
+    required_error: "Age is required",
+    invalid_type_error: "Age must be a number",
+  }).min(18, "You must be at least 18 years old"),
+});
+
+try {
+  checkSchema(schema, { email: "invalid", age: 15 });
+} catch (err) {
+  // ZodError with custom messages
+  console.error(err.errors);
+}
+```
+
+### Conditional Validation
+
+```typescript
+import { checkSchema } from "@apisr/schema";
+import { z } from "zod";
+
+const paymentSchema = z.discriminatedUnion("method", [
+  z.object({
+    method: z.literal("card"),
+    cardNumber: z.string(),
+    cvv: z.string(),
+  }),
+  z.object({
+    method: z.literal("paypal"),
+    email: z.string().email(),
+  }),
+  z.object({
+    method: z.literal("crypto"),
+    wallet: z.string(),
+  }),
+]);
+
+const cardPayment = checkSchema(paymentSchema, {
+  method: "card",
+  cardNumber: "4111111111111111",
+  cvv: "123",
+});
+
+const paypalPayment = checkSchema(paymentSchema, {
+  method: "paypal",
+  email: "user@example.com",
+});
+```
+
+## API Reference
+
+### checkSchema
+
+<ParamField path="schema" type="Schema">
+  Zod schema to validate against
+</ParamField>
+
+<ParamField path="input" type="unknown">
+  Data to validate
+</ParamField>
+
+<ParamField path="options" type="CheckSchemaOptions">
+  Validation options
+</ParamField>
+
+<ParamField path="options.sources" type="Record<string, object>">
+  Multi-source data for resolution (params, body, headers, query)
+</ParamField>
+
+<ParamField path="options.validationType" type="'parse' | 'safeParse'">
+  Validation mode: throw on error (parse) or return null (safeParse)
+</ParamField>
+
+### Type Utilities
+
+<ParamField path="Infer<T>" type="type">
+  Infer TypeScript type from schema
+</ParamField>
+
+<ParamField path="InferOr<T, TOr>" type="type">
+  Infer type with fallback
+</ParamField>
+
+<ParamField path="InferUndefined<T>" type="type">
+  Infer type excluding undefined
+</ParamField>
+
+<ParamField path="ExtractSchema<T>" type="type">
+  Extract schema from object type
+</ParamField>
+
+<ParamField path="ExtractSchemaFromKey<T, Key>" type="type">
+  Extract specific schema field
+</ParamField>
+
+### Checking Utilities
+
+<ParamField path="isZodSchema" type="(value: unknown) => boolean">
+  Check if value is a Zod schema
+</ParamField>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Type Inference" icon="wand-magic-sparkles">
+    Always use `Infer<typeof schema>` instead of manually defining types.
+  </Card>
+  <Card title="Validate Early" icon="shield-check">
+    Validate data at API boundaries before processing.
+  </Card>
+  <Card title="Safe Parse in Forms" icon="square-check">
+    Use `safeParse` for user-facing forms to handle errors gracefully.
+  </Card>
+  <Card title="Source Resolution" icon="diagram-project">
+    Use multi-source resolution in API handlers to validate all request data.
+  </Card>
+</CardGroup>
+
+## Integration with Other Packages
+
+`@apisr/schema` integrates seamlessly with other Apiser packages:
+
+- **`@apisr/controller`** — Use for handler payload validation
+- **`@apisr/response`** — Use for error input validation
+- **`@apisr/zod`** — Extends Zod with source resolution utilities
+
+```typescript
+import { createHandler } from "@apisr/controller";
+import { createResponseHandler } from "@apisr/response";
+import { z } from "@apisr/zod";
+
+const handler = createHandler({
+  responseHandler: createResponseHandler({}),
+});
+
+const getUser = handler(
+  async ({ payload }) => {
+    // payload is validated by @apisr/schema
+    return await db.user.findUnique({
+      where: { id: payload.userId },
+    });
+  },
+  {
+    payload: z.object({
+      userId: z.from("params").string(),
+    }),
+  }
+);
+```

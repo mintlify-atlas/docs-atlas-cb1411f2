@@ -1,0 +1,518 @@
+---
+title: Structured Logging
+description: Guide for implementing structured logging with @apisr/logger
+---
+
+## Overview
+
+`@apisr/logger` provides a flexible, transport-based logging system with:
+
+- **Multiple transports** for different output destinations
+- **Structured log data** with type-safe fields
+- **Log levels** (debug, info, warn, error)
+- **Auto-flush** support for graceful shutdown
+- **Custom transports** for specialized logging needs
+- **File path tracking** for debugging
+
+## Installation
+
+```bash
+bun add @apisr/logger
+```
+
+## Basic Setup
+
+<Steps>
+
+<Step title="Create a logger with console transport">
+
+```ts
+import { createLogger } from "@apisr/logger";
+import { createConsole } from "@apisr/logger/console";
+
+const logger = createLogger({
+  name: "app",
+  transports: {
+    console: createConsole(),
+  },
+});
+```
+
+</Step>
+
+<Step title="Log messages">
+
+```ts
+logger.info("Application started");
+logger.debug("Debug information", { userId: 123 });
+logger.warn("Warning message", { retry: 3 });
+logger.error("Error occurred", { code: "ERR_001" });
+```
+
+</Step>
+
+<Step title="Flush logs on shutdown">
+
+```ts
+process.on("SIGTERM", async () => {
+  await logger.flush();
+  process.exit(0);
+});
+```
+
+</Step>
+
+</Steps>
+
+## Log Levels
+
+The logger supports four log levels:
+
+```ts
+logger.debug("Detailed debugging information");
+logger.info("General information");
+logger.warn("Warning - something might be wrong");
+logger.error("Error - something went wrong");
+```
+
+### Error Logging
+
+Log errors with automatic stack trace capture:
+
+```ts
+try {
+  throw new Error("Something went wrong");
+} catch (error) {
+  logger.error(error, { context: "user-creation" });
+  // Automatically includes error.message, error.stack, error.name
+}
+
+// Or log error messages directly
+logger.error("Failed to connect to database", {
+  host: "localhost",
+  port: 5432,
+});
+```
+
+## Structured Data
+
+Add structured data to your logs:
+
+```ts
+logger.info("User logged in", {
+  userId: "user-123",
+  email: "user@example.com",
+  ip: "192.168.1.1",
+  timestamp: Date.now(),
+});
+
+logger.warn("Rate limit exceeded", {
+  userId: "user-456",
+  endpoint: "/api/users",
+  requestCount: 150,
+  limit: 100,
+});
+
+logger.error("Payment failed", {
+  orderId: "order-789",
+  amount: 99.99,
+  currency: "USD",
+  reason: "insufficient_funds",
+});
+```
+
+<Tip>
+Structured data makes logs searchable and queryable in log aggregation systems like Elasticsearch, Datadog, or CloudWatch.
+</Tip>
+
+## Transports
+
+### Console Transport
+
+Beautiful console output with colors and formatting:
+
+```ts
+import { createConsole } from "@apisr/logger/console";
+
+const logger = createLogger({
+  name: "app",
+  transports: {
+    console: createConsole({
+      colorize: true,
+      timestamp: true,
+      prettify: true,
+    }),
+  },
+});
+```
+
+### Custom Transports
+
+Create custom transports for specialized logging:
+
+```ts
+import { createTransport, type TransportLogFnContext } from "@apisr/logger";
+
+const fileTransport = createTransport({
+  log: (ctx: TransportLogFnContext) => {
+    const logEntry = {
+      level: ctx.level,
+      message: ctx.message,
+      data: ctx.data,
+      timestamp: ctx.timestamp,
+      file: ctx.file.path,
+      line: ctx.file.codeLine,
+    };
+    
+    // Write to file
+    fs.appendFileSync(
+      "app.log",
+      JSON.stringify(logEntry) + "\n"
+    );
+  },
+});
+
+const logger = createLogger({
+  name: "app",
+  transports: {
+    console: createConsole(),
+    file: fileTransport,
+  },
+});
+```
+
+### Multiple Transports
+
+Log to multiple destinations simultaneously:
+
+```ts
+const logger = createLogger({
+  name: "app",
+  transports: {
+    console: createConsole(),
+    file: fileTransport,
+    cloudwatch: cloudwatchTransport,
+    datadog: datadogTransport,
+  },
+});
+
+// All transports receive the log
+logger.info("User action", { action: "purchase" });
+```
+
+## Targeted Logging
+
+Log to specific transports:
+
+```ts
+const logger = createLogger({
+  name: "app",
+  transports: {
+    console: createConsole(),
+    file: fileTransport,
+    alert: slackTransport,
+  },
+});
+
+// Log only to console
+logger.to("console").debug("Debug info");
+
+// Log only to file
+logger.to("file").info("Archival log");
+
+// Log to multiple specific transports
+logger.to(["console", "alert"]).error("Critical error!", {
+  severity: "high",
+});
+```
+
+<Tip>
+Use targeted logging to send critical errors to alerting systems while keeping debug logs local.
+</Tip>
+
+## Auto-Flush
+
+Automatically flush logs at intervals or on process events:
+
+```ts
+const logger = createLogger({
+  name: "app",
+  transports: {
+    console: createConsole(),
+    file: fileTransport,
+  },
+  autoFlush: {
+    // Flush every 5 seconds
+    intervalMs: 5000,
+    
+    // Flush on process events
+    on: ["beforeExit", "SIGINT", "SIGTERM"],
+  },
+});
+```
+
+<Warning>
+Always flush logs before process termination to avoid losing buffered logs.
+</Warning>
+
+## Manual Flushing
+
+Flush logs manually when needed:
+
+```ts
+// Flush all transports
+await logger.flush();
+
+// Flush specific transport
+await logger.to("file").flush();
+```
+
+### Flush in Request Handlers
+
+```ts
+app.post("/api/users", async (req, res) => {
+  try {
+    logger.info("Creating user", { email: req.body.email });
+    
+    const user = await createUser(req.body);
+    
+    logger.info("User created", { userId: user.id });
+    
+    // Flush logs before responding
+    await logger.flush();
+    
+    return res.json({ success: true, user });
+  } catch (error) {
+    logger.error(error, { context: "user-creation" });
+    await logger.flush();
+    return res.status(500).json({ error: "Failed to create user" });
+  }
+});
+```
+
+## Logger Extension
+
+Create child loggers with modified configuration:
+
+```ts
+const logger = createLogger({
+  name: "app",
+  transports: {
+    console: createConsole(),
+    file: fileTransport,
+    alert: slackTransport,
+  },
+});
+
+// Create a child logger that excludes alerting
+const debugLogger = logger.extend({
+  name: "app:debug",
+  excludeTransport: ["alert"],
+});
+
+debugLogger.debug("Debug message"); // Only to console and file
+
+// Create a child logger with custom transport mapping
+const customLogger = logger.extend({
+  name: "app:custom",
+  mapTransport: ({ name, transport }) => {
+    if (name === "console") {
+      return createConsole({ colorize: false });
+    }
+    return transport;
+  },
+});
+```
+
+## Advanced Transport Example: HTTP Logger
+
+```ts
+import { createTransport } from "@apisr/logger";
+
+const httpTransport = createTransport({
+  // Store pending logs
+  store: {
+    buffer: [] as any[],
+  },
+  
+  // Log function
+  log: (ctx) => {
+    ctx.store.buffer.push({
+      level: ctx.level,
+      message: ctx.message,
+      data: ctx.data,
+      timestamp: ctx.timestamp,
+      file: ctx.file.path,
+    });
+  },
+  
+  // Flush function
+  flush: async (ctx) => {
+    if (ctx.logs.length === 0) return;
+    
+    try {
+      await fetch("https://logs.example.com/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          logs: ctx.logs,
+          metadata: {
+            service: "api",
+            environment: process.env.NODE_ENV,
+          },
+        }),
+      });
+      
+      // Clear buffer after successful flush
+      ctx.store.buffer = [];
+    } catch (error) {
+      console.error("Failed to flush logs:", error);
+    }
+  },
+});
+
+const logger = createLogger({
+  name: "api",
+  transports: {
+    console: createConsole(),
+    http: httpTransport,
+  },
+  autoFlush: {
+    intervalMs: 10000, // Flush every 10 seconds
+    on: ["beforeExit"],
+  },
+});
+```
+
+## File Path Tracking
+
+Logs automatically include file path and line number:
+
+```ts
+logger.info("Message from controller");
+// Output includes: file: "/src/controllers/user.ts:42"
+```
+
+This helps with debugging by showing exactly where logs originate.
+
+## Best Practices
+
+<Tip>
+**Use appropriate log levels**
+
+- `debug` — Detailed debugging information (disabled in production)
+- `info` — General informational messages
+- `warn` — Warning conditions that might need attention
+- `error` — Error conditions that need immediate attention
+</Tip>
+
+<Tip>
+**Add context to logs**
+
+Always include relevant context:
+
+```ts
+logger.info("Request processed", {
+  userId: req.user.id,
+  endpoint: req.path,
+  method: req.method,
+  duration: Date.now() - startTime,
+  statusCode: res.statusCode,
+});
+```
+</Tip>
+
+<Tip>
+**Create domain-specific loggers**
+
+```ts
+const authLogger = logger.extend({
+  name: "app:auth",
+  mapTransport: ({ transport }) => transport,
+});
+
+const dbLogger = logger.extend({
+  name: "app:database",
+  excludeTransport: ["console"],
+});
+
+authLogger.info("Login successful", { userId: "123" });
+dbLogger.debug("Query executed", { duration: 45 });
+```
+</Tip>
+
+<Warning>
+**Don't log sensitive data**
+
+Avoid logging passwords, tokens, or PII:
+
+```ts
+// ❌ Bad
+logger.info("User login", { password: user.password });
+
+// ✅ Good
+logger.info("User login", { userId: user.id });
+```
+</Warning>
+
+<Tip>
+**Flush on errors**
+
+Always flush logs when critical errors occur:
+
+```ts
+try {
+  await criticalOperation();
+} catch (error) {
+  logger.error(error, { operation: "critical" });
+  await logger.flush(); // Ensure error is logged immediately
+  throw error;
+}
+```
+</Tip>
+
+## Integration with Controllers
+
+Combine logging with controllers:
+
+```ts
+import { createHandler, createOptions } from "@apisr/controller";
+import { createLogger } from "@apisr/logger";
+import { createConsole } from "@apisr/logger/console";
+
+const logger = createLogger({
+  name: "api",
+  transports: { console: createConsole() },
+});
+
+const options = createOptions({
+  name: "user-controller",
+  bindings: (bindings) => ({
+    logger: bindings.value(logger),
+  }),
+});
+
+const handler = createHandler(options);
+
+const createUser = handler(
+  async ({ payload, logger }) => {
+    logger.info("Creating user", { email: payload.email });
+    
+    try {
+      const user = await db.user.create(payload);
+      logger.info("User created", { userId: user.id });
+      return user;
+    } catch (error) {
+      logger.error(error, { context: "user-creation" });
+      throw error;
+    }
+  },
+  {
+    payload: z.object({
+      email: z.string().email(),
+      name: z.string(),
+    }),
+    logger: true,
+  }
+);
+```

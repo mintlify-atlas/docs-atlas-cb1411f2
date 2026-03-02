@@ -1,0 +1,376 @@
+---
+title: Elysia Integration
+description: Integrate Controller handlers with Elysia web framework
+---
+
+## Overview
+
+The Elysia integration allows you to use Controller handlers seamlessly with the [Elysia](https://elysiajs.com) web framework, automatically handling request/response mapping.
+
+## elysia
+
+Converts a Controller handler component into an Elysia-compatible handler.
+
+```typescript
+import { Elysia } from 'elysia';
+import { createHandler } from '@apisr/controller';
+import { elysia } from '@apisr/controller/elysia';
+import { s } from '@apisr/schema';
+
+const handler = createHandler({});
+
+const getUser = handler(
+  async ({ payload }) => {
+    return { id: payload.id, name: 'John' };
+  },
+  {
+    payload: {
+      id: s.params('id'),
+    },
+  }
+);
+
+const app = new Elysia()
+  .get('/users/:id', ...elysia(getUser))
+  .listen(3000);
+```
+
+<ParamField path="component" type="HandlerFn.Component" required>
+  The Controller handler component to integrate
+</ParamField>
+
+<ResponseField name="tuple" type="[ElysiaCallback, ElysiaOptions]">
+  A tuple of `[callback, options]` to spread into Elysia route methods
+  
+  <ResponseField name="callback" type="ElysiaCallback">
+    The Elysia-compatible route handler function
+  </ResponseField>
+  
+  <ResponseField name="options" type="ElysiaOptions">
+    Additional options for the route (currently empty object)
+  </ResponseField>
+</ResponseField>
+
+## ElysiaCallback
+
+The function signature for Elysia route handlers.
+
+```typescript
+type ElysiaCallback<TResult> = (ctx: Context) => Promise<TResult>;
+```
+
+The callback automatically extracts and maps Elysia context properties to the Controller handler:
+
+- `request` - The raw Request object
+- `params` - URL path parameters
+- `query` - URL query parameters
+- `headers` - Request headers
+- `body` - Request body (as FormData)
+
+## Request Mapping
+
+The integration automatically maps Elysia's context to Controller's `HandlerRequest` format:
+
+```typescript
+interface HandlerRequest {
+  headers: Record<string, string>;
+  params: Record<string, string>;
+  query: Record<string, string>;
+  url: string;
+  body: FormData;
+}
+```
+
+## Usage Examples
+
+### Basic Route
+
+```typescript
+import { Elysia } from 'elysia';
+import { createHandler } from '@apisr/controller';
+import { elysia } from '@apisr/controller/elysia';
+import { s } from '@apisr/schema';
+
+const handler = createHandler({});
+
+const getHello = handler(
+  async ({ payload }) => {
+    return { message: `Hello, ${payload.name}!` };
+  },
+  {
+    payload: {
+      name: s.query('name').default('World'),
+    },
+  }
+);
+
+const app = new Elysia()
+  .get('/hello', ...elysia(getHello))
+  .listen(3000);
+```
+
+### CRUD Operations
+
+```typescript
+import { Elysia } from 'elysia';
+import { createHandler, createOptions } from '@apisr/controller';
+import { createResponseHandler } from '@apisr/response';
+import { elysia } from '@apisr/controller/elysia';
+import { s } from '@apisr/schema';
+import { User } from './models';
+
+const responseHandler = createResponseHandler({
+  errors: {
+    notFound: { status: 404, message: 'User not found' },
+    validation: { status: 400, message: 'Validation error' },
+  },
+});
+
+const options = createOptions({
+  responseHandler,
+  bindings: (bind) => ({
+    user: bind.model(User, {
+      from: 'params',
+      fromKey: 'id',
+      async load({ id, fail }) {
+        const user = await User.findById(id);
+        if (!user) throw fail('notFound', { id });
+        return user;
+      },
+    }),
+  }),
+});
+
+const handler = createHandler(options);
+
+// List users
+const listUsers = handler(
+  async () => {
+    const users = await User.findAll();
+    return { users };
+  },
+  {}
+);
+
+// Get user
+const getUser = handler(
+  async ({ user }) => {
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+    };
+  },
+  {
+    payload: { id: s.params('id') },
+    user: true,
+  }
+);
+
+// Create user
+const createUser = handler(
+  async ({ payload }) => {
+    const user = await User.create(payload);
+    return { id: user.id };
+  },
+  {
+    payload: {
+      name: s.body('name'),
+      email: s.body('email'),
+    },
+  }
+);
+
+// Update user
+const updateUser = handler(
+  async ({ payload, user }) => {
+    await user.update(payload);
+    return { success: true };
+  },
+  {
+    payload: {
+      id: s.params('id'),
+      name: s.body('name').optional(),
+      email: s.body('email').optional(),
+    },
+    user: true,
+  }
+);
+
+// Delete user
+const deleteUser = handler(
+  async ({ user }) => {
+    await user.delete();
+    return { success: true };
+  },
+  {
+    payload: { id: s.params('id') },
+    user: true,
+  }
+);
+
+const app = new Elysia()
+  .get('/users', ...elysia(listUsers))
+  .get('/users/:id', ...elysia(getUser))
+  .post('/users', ...elysia(createUser))
+  .patch('/users/:id', ...elysia(updateUser))
+  .delete('/users/:id', ...elysia(deleteUser))
+  .listen(3000);
+
+console.log(`Server running at http://localhost:3000`);
+```
+
+### With Authentication
+
+```typescript
+import { Elysia } from 'elysia';
+import { createHandler, createOptions } from '@apisr/controller';
+import { elysia } from '@apisr/controller/elysia';
+import { s } from '@apisr/schema';
+import { verifyToken } from './auth';
+
+const options = createOptions({
+  bindings: (bind) => ({
+    auth: bind((required = true) => ({
+      async resolve({ request, fail }) {
+        const token = request?.headers.authorization?.replace('Bearer ', '');
+        
+        if (!token && required) {
+          throw fail('unauthorized', {});
+        }
+        
+        if (!token) return null;
+        
+        const user = await verifyToken(token);
+        
+        if (!user && required) {
+          throw fail('unauthorized', {});
+        }
+        
+        return user;
+      },
+    })),
+  }),
+});
+
+const handler = createHandler(options);
+
+const getProfile = handler(
+  async ({ auth }) => {
+    return {
+      id: auth.id,
+      email: auth.email,
+      name: auth.name,
+    };
+  },
+  {
+    auth: true,
+  }
+);
+
+const app = new Elysia()
+  .get('/profile', ...elysia(getProfile))
+  .listen(3000);
+```
+
+### With Caching
+
+```typescript
+import { Elysia } from 'elysia';
+import { createHandler } from '@apisr/controller';
+import { elysia } from '@apisr/controller/elysia';
+import { s } from '@apisr/schema';
+import Keyv from 'keyv';
+
+const store = new Keyv();
+
+const handler = createHandler({
+  cache: {
+    store,
+  },
+});
+
+const getStats = handler(
+  async ({ payload, cache }) => {
+    const stats = await cache(
+      ['stats', payload.userId],
+      async () => {
+        // Expensive operation
+        return await calculateUserStats(payload.userId);
+      },
+      { ttl: 300000 } // Cache for 5 minutes
+    );
+    
+    return stats;
+  },
+  {
+    payload: {
+      userId: s.params('userId'),
+    },
+  }
+);
+
+const app = new Elysia()
+  .get('/users/:userId/stats', ...elysia(getStats))
+  .listen(3000);
+```
+
+## Type Safety
+
+The Elysia integration preserves full type safety:
+
+```typescript
+const getUser = handler(
+  async ({ payload }) => {
+    return {
+      id: payload.id,
+      name: 'John',
+      age: 30,
+    };
+  },
+  {
+    payload: {
+      id: s.params('id'),
+    },
+  }
+);
+
+// Return type is automatically inferred:
+// Promise<{ id: string; name: string; age: number; }>
+const app = new Elysia()
+  .get('/users/:id', ...elysia(getUser))
+  .listen(3000);
+```
+
+## Error Handling
+
+Errors thrown via the `fail` function are automatically converted to proper HTTP responses:
+
+```typescript
+import { createResponseHandler } from '@apisr/response';
+
+const responseHandler = createResponseHandler({
+  errors: {
+    notFound: { status: 404, message: 'Not found' },
+    unauthorized: { status: 401, message: 'Unauthorized' },
+    validation: { status: 400, message: 'Validation error' },
+  },
+});
+
+const handler = createHandler({ responseHandler });
+
+const getResource = handler(
+  async ({ payload, fail }) => {
+    const resource = await db.findById(payload.id);
+    
+    if (!resource) {
+      throw fail('notFound', { id: payload.id });
+    }
+    
+    return resource;
+  },
+  {
+    payload: { id: s.params('id') },
+  }
+);
+```

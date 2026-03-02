@@ -1,0 +1,562 @@
+---
+title: Schema Validation
+description: Guide for schema validation and type-safe data handling with @apisr/schema and @apisr/zod
+---
+
+## Overview
+
+`@apisr/schema` provides a unified interface for schema validation, while `@apisr/zod` extends Zod with request mapping capabilities:
+
+- **Type-safe validation** with Zod schemas
+- **Automatic request field mapping** from different sources
+- **Nested path resolution** for complex objects
+- **Runtime validation** with parse and safeParse modes
+- **Source-based field extraction** from params, query, body, and headers
+
+## Installation
+
+```bash
+bun add @apisr/schema @apisr/zod zod
+```
+
+## Basic Validation
+
+<Steps>
+
+<Step title="Import Zod from @apisr/zod">
+
+```ts
+import { z } from "@apisr/zod";
+```
+
+This extended version of Zod includes the `.from()` method for request mapping.
+
+</Step>
+
+<Step title="Define a schema">
+
+```ts
+const userSchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+  age: z.number().min(18).max(120),
+});
+```
+
+</Step>
+
+<Step title="Validate data">
+
+```ts
+import { checkSchema } from "@apisr/schema";
+
+const data = {
+  name: "John Doe",
+  email: "john@example.com",
+  age: 30,
+};
+
+const validated = checkSchema(userSchema, data);
+// Type: { name: string; email: string; age: number }
+```
+
+</Step>
+
+</Steps>
+
+## Request Field Mapping
+
+The `.from()` method specifies where a field should be extracted from in HTTP requests.
+
+### Basic Mapping
+
+```ts
+import { z } from "@apisr/zod";
+
+const schema = z.object({
+  // From URL params (e.g., /users/:id)
+  id: z.string().from("params"),
+  
+  // From query string (e.g., ?search=john)
+  search: z.string().from("query"),
+  
+  // From request body
+  name: z.string().from("body"),
+  email: z.string().from("body"),
+  
+  // From request headers
+  token: z.string().from("headers"),
+});
+```
+
+### Custom Key Mapping
+
+Map fields from different key names:
+
+```ts
+const schema = z.object({
+  // Field "auth" comes from header "authorization"
+  auth: z.string().from("headers", { key: "authorization" }),
+  
+  // Field "userId" comes from param "id"
+  userId: z.string().from("params", { key: "id" }),
+  
+  // Field "userEmail" comes from body "email"
+  userEmail: z.string().from("body", { key: "email" }),
+});
+```
+
+### Multiple Key Fallbacks
+
+```ts
+const schema = z.object({
+  // Try multiple header keys
+  token: z.string().from("headers", {
+    key: ["authorization", "x-auth-token", "x-api-key"],
+  }),
+});
+```
+
+## Validation Modes
+
+### Parse Mode (Default)
+
+Throws an error if validation fails:
+
+```ts
+import { checkSchema } from "@apisr/schema";
+
+try {
+  const validated = checkSchema(userSchema, data, {
+    validationType: "parse", // Default
+  });
+  console.log(validated);
+} catch (error) {
+  // ZodError with detailed validation errors
+  console.error(error);
+}
+```
+
+### Safe Parse Mode
+
+Returns null instead of throwing:
+
+```ts
+const validated = checkSchema(userSchema, data, {
+  validationType: "safeParse",
+});
+
+if (validated === null) {
+  console.error("Validation failed");
+} else {
+  console.log(validated);
+}
+```
+
+## Source-based Validation
+
+Validate data from multiple request sources:
+
+```ts
+import { checkSchema } from "@apisr/schema";
+import { z } from "@apisr/zod";
+
+const schema = z.object({
+  userId: z.string().from("params"),
+  name: z.string().from("body"),
+  email: z.string().from("body"),
+  token: z.string().from("headers", { key: "authorization" }),
+  page: z.number().from("query"),
+});
+
+const validated = checkSchema(schema, {}, {
+  sources: {
+    params: { userId: "123" },
+    body: { name: "John", email: "john@example.com" },
+    headers: { authorization: "Bearer token" },
+    query: { page: "1" },
+  },
+});
+
+// Result:
+// {
+//   userId: "123",
+//   name: "John",
+//   email: "john@example.com",
+//   token: "Bearer token",
+//   page: 1
+// }
+```
+
+<Note>
+When using `.from()`, the initial input object is merged with values extracted from sources.
+</Note>
+
+## Nested Path Resolution
+
+Extract nested values using dot notation:
+
+```ts
+const schema = z.object({
+  userName: z.string().from("body", { key: "user.name" }),
+  userEmail: z.string().from("body", { key: "user.email" }),
+  addressCity: z.string().from("body", { key: "user.address.city" }),
+});
+
+const validated = checkSchema(schema, {}, {
+  sources: {
+    body: {
+      user: {
+        name: "John",
+        email: "john@example.com",
+        address: {
+          city: "New York",
+        },
+      },
+    },
+  },
+});
+
+// Result:
+// {
+//   userName: "John",
+//   userEmail: "john@example.com",
+//   addressCity: "New York"
+// }
+```
+
+## Common Validation Patterns
+
+### Email Validation
+
+```ts
+const schema = z.object({
+  email: z.string().email(),
+  secondaryEmail: z.string().email().optional(),
+});
+```
+
+### URL Validation
+
+```ts
+const schema = z.object({
+  website: z.string().url(),
+  avatar: z.string().url().optional(),
+});
+```
+
+### UUID Validation
+
+```ts
+const schema = z.object({
+  id: z.string().uuid(),
+  userId: z.string().uuid(),
+});
+```
+
+### Number Constraints
+
+```ts
+const schema = z.object({
+  age: z.number().int().positive().max(120),
+  price: z.number().positive().max(1000000),
+  quantity: z.number().int().min(1).max(100),
+  rating: z.number().min(1).max(5),
+});
+```
+
+### String Constraints
+
+```ts
+const schema = z.object({
+  username: z.string().min(3).max(20),
+  password: z.string().min(8).max(100),
+  bio: z.string().max(500).optional(),
+  code: z.string().length(6), // Exact length
+});
+```
+
+### Enums
+
+```ts
+const schema = z.object({
+  role: z.enum(["admin", "user", "guest"]),
+  status: z.enum(["active", "pending", "suspended"]),
+});
+```
+
+### Arrays
+
+```ts
+const schema = z.object({
+  tags: z.array(z.string()),
+  scores: z.array(z.number()).min(1).max(10),
+  emails: z.array(z.string().email()),
+});
+```
+
+### Nested Objects
+
+```ts
+const schema = z.object({
+  user: z.object({
+    name: z.string(),
+    email: z.string().email(),
+    address: z.object({
+      street: z.string(),
+      city: z.string(),
+      zipCode: z.string(),
+    }),
+  }),
+});
+```
+
+### Optional and Nullable
+
+```ts
+const schema = z.object({
+  name: z.string(),
+  nickname: z.string().optional(), // string | undefined
+  middleName: z.string().nullable(), // string | null
+  bio: z.string().optional().nullable(), // string | null | undefined
+});
+```
+
+### Default Values
+
+```ts
+const schema = z.object({
+  role: z.string().default("user"),
+  isActive: z.boolean().default(true),
+  createdAt: z.date().default(() => new Date()),
+});
+```
+
+## Custom Validation
+
+### Refine
+
+Add custom validation logic:
+
+```ts
+const schema = z.object({
+  password: z.string().min(8),
+  confirmPassword: z.string(),
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "Passwords don't match",
+  path: ["confirmPassword"],
+});
+```
+
+### Transform
+
+Transform validated data:
+
+```ts
+const schema = z.object({
+  email: z.string().email().transform((val) => val.toLowerCase()),
+  name: z.string().transform((val) => val.trim()),
+  age: z.string().transform((val) => Number.parseInt(val, 10)),
+});
+```
+
+## Integration with Controllers
+
+Use schemas in controller handlers:
+
+```ts
+import { createHandler, createOptions } from "@apisr/controller";
+import { z } from "@apisr/zod";
+
+const options = createOptions({
+  name: "user-controller",
+});
+
+const handler = createHandler(options);
+
+const createUser = handler(
+  async ({ payload }) => {
+    // payload is fully typed and validated
+    return await db.user.create({
+      name: payload.name,
+      email: payload.email,
+      age: payload.age,
+    });
+  },
+  {
+    payload: z.object({
+      name: z.string().min(2).from("body"),
+      email: z.string().email().from("body"),
+      age: z.number().int().min(18).max(120).from("body"),
+    }),
+  }
+);
+
+const updateUser = handler(
+  async ({ payload }) => {
+    return await db.user.update(payload.id, {
+      name: payload.name,
+      email: payload.email,
+    });
+  },
+  {
+    payload: z.object({
+      id: z.string().uuid().from("params"),
+      name: z.string().min(2).from("body"),
+      email: z.string().email().from("body"),
+      token: z.string().from("headers", { key: "authorization" }),
+    }),
+  }
+);
+```
+
+## Type Inference
+
+Infer TypeScript types from schemas:
+
+```ts
+import type { Infer } from "@apisr/schema";
+import { z } from "@apisr/zod";
+
+const userSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  email: z.string().email(),
+  age: z.number().int(),
+  role: z.enum(["admin", "user"]),
+});
+
+type User = Infer<typeof userSchema>;
+// Type:
+// {
+//   id: string;
+//   name: string;
+//   email: string;
+//   age: number;
+//   role: "admin" | "user";
+// }
+```
+
+## Schema Metadata
+
+Extract metadata about field sources:
+
+```ts
+import { resolveZodSchemaMeta } from "@apisr/zod";
+
+const schema = z.object({
+  name: z.string().from("body"),
+  id: z.string().from("params"),
+  token: z.string().from("headers", { key: "authorization" }),
+});
+
+const meta = resolveZodSchemaMeta(schema);
+// Result:
+// {
+//   name: { from: "body" },
+//   id: { from: "params" },
+//   token: { from: "headers", key: "authorization" },
+// }
+```
+
+## Best Practices
+
+<Tip>
+**Use specific validators**
+
+Leverage Zod's built-in validators:
+
+```ts
+z.string().email()     // Email validation
+z.string().url()       // URL validation
+z.string().uuid()      // UUID validation
+z.string().cuid()      // CUID validation
+z.number().int()       // Integer validation
+z.number().positive()  // Positive number
+```
+</Tip>
+
+<Tip>
+**Validate early**
+
+Validate input as early as possible in your request pipeline:
+
+```ts
+const handler = createHandler(options);
+
+const endpoint = handler(
+  async ({ payload }) => {
+    // payload is already validated here
+    return await processData(payload);
+  },
+  {
+    payload: validationSchema, // Validation happens before handler executes
+  }
+);
+```
+</Tip>
+
+<Warning>
+**Don't skip validation**
+
+Never trust client input. Always validate:
+
+```ts
+// ❌ Bad - No validation
+const createUser = async (data: any) => {
+  return await db.user.create(data);
+};
+
+// ✅ Good - Validated input
+const createUser = handler(
+  async ({ payload }) => {
+    return await db.user.create(payload);
+  },
+  {
+    payload: userSchema,
+  }
+);
+```
+</Warning>
+
+<Tip>
+**Reuse schemas**
+
+Create reusable schema components:
+
+```ts
+// Shared schemas
+const emailSchema = z.string().email();
+const uuidSchema = z.string().uuid();
+const paginationSchema = z.object({
+  page: z.number().int().min(1).default(1),
+  limit: z.number().int().min(1).max(100).default(20),
+});
+
+// Compose schemas
+const getUsersSchema = z.object({
+  search: z.string().optional(),
+}).merge(paginationSchema);
+
+const createUserSchema = z.object({
+  name: z.string(),
+  email: emailSchema,
+});
+```
+</Tip>
+
+<Tip>
+**Provide helpful error messages**
+
+```ts
+const schema = z.object({
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .regex(
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/,
+      "Password must contain uppercase, lowercase, and number"
+    ),
+});
+```
+</Tip>

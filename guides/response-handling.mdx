@@ -1,0 +1,608 @@
+---
+title: Response Handling
+description: Guide for building type-safe response handling patterns with @apisr/response
+---
+
+## Overview
+
+`@apisr/response` provides a type-safe, schema-driven approach to handling API responses with:
+
+- **Unified response format** across all endpoints
+- **Type-safe error definitions** with custom error types
+- **Automatic response mapping** with JSON, text, and binary support
+- **Meta information injection** for tracking and debugging
+- **Custom response transformations**
+
+## Installation
+
+```bash
+bun add @apisr/response @apisr/schema @apisr/zod
+```
+
+## Basic Setup
+
+<Steps>
+
+<Step title="Create a response handler">
+
+Define your response structure using `createResponseHandler`:
+
+```ts
+import { createResponseHandler } from "@apisr/response";
+import { z } from "@apisr/zod";
+
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({
+    schema: z.object({
+      data: z.any(),
+      type: z.string(),
+    }),
+  }),
+}));
+```
+
+</Step>
+
+<Step title="Define custom errors">
+
+Add custom error types to your response handler:
+
+```ts
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({
+    schema: z.object({
+      data: z.any(),
+    }),
+  }),
+  error: {
+    schema: z.object({
+      code: z.string(),
+      message: z.string(),
+    }),
+  },
+}))
+  .defineError("notFound", {
+    code: "NOT_FOUND",
+    message: "Resource not found",
+  })
+  .defineError("unauthorized", {
+    code: "UNAUTHORIZED",
+    message: "Authentication required",
+  });
+```
+
+</Step>
+
+<Step title="Use the response handler">
+
+Generate responses in your API handlers:
+
+```ts
+// Success response
+const response = responseHandler.json({ data: { id: 1, name: "John" } });
+
+// Error response
+const errorResponse = responseHandler.fail("notFound");
+```
+
+</Step>
+
+</Steps>
+
+## Response Types
+
+### JSON Responses
+
+Create JSON responses with automatic serialization:
+
+```ts
+const response = responseHandler.json(
+  {
+    users: [
+      { id: 1, name: "Alice" },
+      { id: 2, name: "Bob" },
+    ],
+  },
+  {
+    status: 200,
+    headers: {
+      "Cache-Control": "max-age=3600",
+    },
+  }
+);
+```
+
+### Text Responses
+
+Create plain text responses:
+
+```ts
+const response = responseHandler.text("Hello, World!", {
+  status: 200,
+  headers: {
+    "Content-Type": "text/plain",
+  },
+});
+```
+
+### Binary Responses
+
+Create binary responses for files and streams:
+
+```ts
+const blob = new Blob([data], { type: "application/pdf" });
+
+const response = responseHandler.binary(blob, {
+  status: 200,
+  headers: {
+    "Content-Disposition": 'attachment; filename="document.pdf"',
+  },
+});
+```
+
+<Tip>
+Binary responses support:
+- `Blob`
+- `ArrayBuffer`
+- `Uint8Array`
+- `ReadableStream`
+</Tip>
+
+## Error Handling
+
+### Defining Error Types
+
+#### Static Errors
+
+Define errors with fixed output:
+
+```ts
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({ schema: z.object({ data: z.any() }) }),
+  error: {
+    schema: z.object({
+      code: z.string(),
+      message: z.string(),
+      status: z.number(),
+    }),
+  },
+}))
+  .defineError("notFound", {
+    code: "NOT_FOUND",
+    message: "The requested resource was not found",
+    status: 404,
+  })
+  .defineError("serverError", {
+    code: "INTERNAL_ERROR",
+    message: "An internal server error occurred",
+    status: 500,
+  });
+```
+
+#### Dynamic Errors
+
+Define errors that accept input:
+
+```ts
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({ schema: z.object({ data: z.any() }) }),
+  error: {
+    schema: z.object({
+      code: z.string(),
+      message: z.string(),
+      field: z.string().optional(),
+    }),
+  },
+}))
+  .defineError(
+    "validationError",
+    ({ input }) => ({
+      code: "VALIDATION_ERROR",
+      message: `Validation failed: ${input.reason}`,
+      field: input.field,
+    }),
+    {
+      input: z.object({
+        field: z.string(),
+        reason: z.string(),
+      }),
+    }
+  );
+
+// Usage
+const error = responseHandler.fail("validationError", {
+  field: "email",
+  reason: "Invalid email format",
+});
+```
+
+#### Errors with Meta
+
+Access meta information in error handlers:
+
+```ts
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({ schema: z.object({ data: z.any() }) }),
+  meta: {
+    schema: z.object({
+      requestId: z.string(),
+      timestamp: z.number(),
+    }),
+  },
+  error: {
+    schema: z.object({
+      code: z.string(),
+      message: z.string(),
+      requestId: z.string(),
+    }),
+  },
+}))
+  .defineError(
+    "trackedError",
+    ({ meta, input }) => ({
+      code: "TRACKED_ERROR",
+      message: input.message,
+      requestId: meta.requestId, // Access meta
+    }),
+    {
+      input: z.object({
+        message: z.string(),
+      }),
+    }
+  );
+```
+
+### Error Response Options
+
+Customize error status codes and text:
+
+```ts
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({ schema: z.object({ data: z.any() }) }),
+  error: {
+    schema: z.object({
+      code: z.string(),
+      message: z.string(),
+    }),
+  },
+}))
+  .defineError(
+    "paymentRequired",
+    {
+      code: "PAYMENT_REQUIRED",
+      message: "Payment is required to access this resource",
+    },
+    {
+      status: 402,
+      statusText: "Payment Required",
+    }
+  );
+```
+
+### Default Error Types
+
+Built-in error types are automatically available:
+
+```ts
+// Throws 401 Unauthorized
+throw responseHandler.fail("unauthorized");
+
+// Throws 403 Forbidden
+throw responseHandler.fail("forbidden");
+
+// Throws 404 Not Found
+throw responseHandler.fail("notFound");
+
+// Throws 400 Bad Request
+throw responseHandler.fail("badRequest");
+
+// Throws 409 Conflict
+throw responseHandler.fail("conflict");
+
+// Throws 429 Too Many Requests
+throw responseHandler.fail("tooMany");
+
+// Throws 500 Internal Server Error
+throw responseHandler.fail("internal", { cause: error });
+```
+
+## Meta Information
+
+### Defining Meta Schema
+
+Add metadata to all responses:
+
+```ts
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({
+    schema: z.object({ data: z.any() }),
+  }),
+  meta: {
+    schema: z.object({
+      requestId: z.string(),
+      timestamp: z.number(),
+      version: z.string(),
+    }),
+    default: () => ({
+      requestId: crypto.randomUUID(),
+      timestamp: Date.now(),
+      version: "v1.0.0",
+    }),
+  },
+}));
+```
+
+### Preassigning Meta
+
+Create response handlers with pre-set meta:
+
+```ts
+const requestHandler = responseHandler.withMeta({
+  requestId: "abc-123",
+  userId: "user-456",
+});
+
+// All responses will include the preassigned meta
+const response = requestHandler.json({ data: { message: "Hello" } });
+```
+
+<Tip>
+Use `.withMeta()` for request-scoped metadata like request IDs, user context, or trace information.
+</Tip>
+
+## Response Transformation
+
+### Custom JSON Mapping
+
+Transform JSON data before serialization:
+
+```ts
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({
+    schema: z.object({
+      result: z.any(),
+      count: z.number(),
+    }),
+    mapData: (input) => ({
+      result: input,
+      count: Array.isArray(input) ? input.length : 1,
+    }),
+  }),
+}));
+
+// Input: [{ id: 1 }, { id: 2 }]
+// Output: { result: [{ id: 1 }, { id: 2 }], count: 2 }
+const response = responseHandler.json([{ id: 1 }, { id: 2 }]);
+```
+
+### Custom Binary Transformation
+
+```ts
+const responseHandler = createResponseHandler((options) => ({
+  binary: options.binary({
+    mapData: (input) => {
+      // Add watermark or transform binary data
+      return addWatermark(input);
+    },
+  }),
+}));
+```
+
+### Custom Error Mapping
+
+Transform error output globally:
+
+```ts
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({ schema: z.object({ data: z.any() }) }),
+  error: {
+    schema: z.object({
+      error: z.string(),
+      details: z.string(),
+    }),
+    mapDefaultError: (defaultError) => ({
+      error: defaultError.name,
+      details: defaultError.message,
+    }),
+  },
+}));
+```
+
+## Custom Response Mapping
+
+Override the default response structure:
+
+```ts
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({
+    schema: z.object({ data: z.any() }),
+  }),
+  error: {
+    schema: z.object({ error: z.string() }),
+  },
+  mapResponse: ({ data, error, response }) => {
+    // Custom response structure
+    if (error) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: error,
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        payload: data,
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  },
+}));
+```
+
+## Headers Management
+
+### Static Headers
+
+Add headers to all responses:
+
+```ts
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({
+    schema: z.object({ data: z.any() }),
+    headers: {
+      "X-API-Version": "1.0",
+      "X-Rate-Limit": "100",
+    },
+  }),
+}));
+```
+
+### Dynamic Headers
+
+Generate headers based on response data:
+
+```ts
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({
+    schema: z.object({
+      data: z.any(),
+      total: z.number(),
+    }),
+    headers: ({ output }) => ({
+      "X-Total-Count": String(output.total),
+      "X-Page-Size": "20",
+    }),
+  }),
+}));
+```
+
+### Error-specific Headers
+
+```ts
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({ schema: z.object({ data: z.any() }) }),
+  error: {
+    schema: z.object({ code: z.string() }),
+    headers: (error) => ({
+      "X-Error-Code": error.code,
+      "Retry-After": error.code === "RATE_LIMIT" ? "60" : undefined,
+    }),
+  },
+}));
+```
+
+## Default Response Format
+
+By default, responses follow this structure:
+
+```ts
+interface DefaultResponse<TData = unknown> {
+  success: boolean;
+  error: ErrorResponse | null;
+  data: TData | null;
+  metadata: Record<string, unknown>;
+}
+```
+
+**Success response:**
+```json
+{
+  "success": true,
+  "error": null,
+  "data": { "id": 1, "name": "John" },
+  "metadata": {
+    "requestId": "abc-123",
+    "timestamp": 1234567890
+  }
+}
+```
+
+**Error response:**
+```json
+{
+  "success": false,
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Resource not found"
+  },
+  "data": null,
+  "metadata": {
+    "requestId": "abc-123",
+    "timestamp": 1234567890
+  }
+}
+```
+
+## Best Practices
+
+<Tip>
+**Consistent error schemas**
+
+Define a consistent error schema across your entire API:
+
+```ts
+error: {
+  schema: z.object({
+    code: z.string(),
+    message: z.string(),
+    details: z.record(z.any()).optional(),
+    timestamp: z.number(),
+  }),
+}
+```
+</Tip>
+
+<Tip>
+**Use meta for debugging**
+
+Include request IDs and timing information in meta:
+
+```ts
+meta: {
+  schema: z.object({
+    requestId: z.string(),
+    duration: z.number(),
+    timestamp: z.number(),
+  }),
+  default: () => ({
+    requestId: crypto.randomUUID(),
+    timestamp: Date.now(),
+    duration: 0, // Calculate in middleware
+  }),
+}
+```
+</Tip>
+
+<Warning>
+**Avoid exposing sensitive data**
+
+Never include sensitive information (passwords, tokens, internal IDs) in error messages or metadata that might be logged or sent to clients.
+</Warning>
+
+<Tip>
+**Type-safe error handling**
+
+Leverage TypeScript's type inference:
+
+```ts
+const result = await handler();
+
+if (result.error) {
+  // result.error is fully typed based on your error schema
+  console.error(result.error.code, result.error.message);
+} else {
+  // result.data is fully typed based on your success schema
+  console.log(result.data);
+}
+```
+</Tip>

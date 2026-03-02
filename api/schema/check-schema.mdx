@@ -1,0 +1,136 @@
+---
+title: checkSchema
+description: Validate data against Zod schemas with automatic source resolution
+---
+
+## Overview
+
+The `checkSchema` function validates input data against a schema (currently supports Zod) and optionally resolves field values from multiple sources based on `.from()` metadata.
+
+## Function Signature
+
+```typescript
+function checkSchema<TSchema extends Schema>(
+  schema: TSchema,
+  input: unknown,
+  options?: CheckSchemaOptions
+): unknown
+```
+
+## Parameters
+
+<ParamField path="schema" type="TSchema" required>
+  The Zod schema to validate against
+</ParamField>
+
+<ParamField path="input" type="unknown" required>
+  The data to validate
+</ParamField>
+
+<ParamField path="options" type="CheckSchemaOptions">
+  Validation options
+  
+  <ParamField path="sources" type="Record<string, Record<string, unknown>>">
+    A map of sources for field resolution. Keys should match the `from` values used in your schema (e.g., `"query"`, `"params"`, `"body"`, `"headers"`, `"handler.payload"`)
+  </ParamField>
+  
+  <ParamField path="validationType" type="'parse' | 'safeParse'" default="'parse'">
+    - `"parse"`: Throws an error if validation fails
+    - `"safeParse"`: Returns `null` if validation fails (no error thrown)
+  </ParamField>
+</ParamField>
+
+## Return Value
+
+Returns the validated and typed data. If `validationType` is `"safeParse"` and validation fails, returns `null`.
+
+## Examples
+
+### Basic Validation
+
+```typescript
+import { checkSchema } from "@apisr/schema";
+import { z } from "@apisr/zod";
+
+const userSchema = z.object({
+  name: z.string(),
+  age: z.number(),
+});
+
+const result = checkSchema(userSchema, {
+  name: "John",
+  age: 30,
+});
+// { name: "John", age: 30 }
+```
+
+### Safe Parsing
+
+```typescript
+const result = checkSchema(
+  userSchema,
+  { name: "John", age: "invalid" },
+  { validationType: "safeParse" }
+);
+// null (validation failed, but no error thrown)
+```
+
+### Source Resolution
+
+When using `.from()` metadata in your schema, `checkSchema` automatically resolves field values from the specified sources:
+
+```typescript
+import { z } from "@apisr/zod";
+
+const requestSchema = z.object({
+  userId: z.string().from("params"),
+  search: z.string().from("query"),
+  name: z.string().from("body"),
+  auth: z.string().from("headers", { key: "authorization" }),
+});
+
+const result = checkSchema(
+  requestSchema,
+  {}, // Initial input (will be merged with resolved sources)
+  {
+    sources: {
+      params: { userId: "123" },
+      query: { search: "test" },
+      body: { name: "John" },
+      headers: { authorization: "Bearer token" },
+    },
+  }
+);
+
+// Result:
+// {
+//   userId: "123",
+//   search: "test",
+//   name: "John",
+//   auth: "Bearer token"
+// }
+```
+
+### Custom Source Keys
+
+You can specify custom keys or fallback keys when resolving from sources:
+
+```typescript
+const schema = z.object({
+  username: z.string().from("body", { key: "user_name" }),
+  id: z.string().from("params", { key: ["id", "userId"] }), // Fallback support
+});
+
+const result = checkSchema(schema, {}, {
+  sources: {
+    body: { user_name: "john_doe" },
+    params: { userId: "456" }, // Will use userId since id doesn't exist
+  },
+});
+// { username: "john_doe", id: "456" }
+```
+
+## Related
+
+- [Type Inference](/api/schema/type-inference)
+- [Zod Utilities](/api/zod/utilities)

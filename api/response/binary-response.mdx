@@ -1,0 +1,333 @@
+---
+title: BinaryResponse
+description: Binary response class for files, images, and streams
+---
+
+The `BinaryResponse` class handles binary data responses including files, images, PDFs, and streaming content.
+
+## Binary Type
+
+Supported binary data types:
+
+```typescript
+type Binary = Blob | ArrayBuffer | Uint8Array | ReadableStream;
+```
+
+## BinaryResponse.Base
+
+A response class that extends the native `Response` class for binary content.
+
+```typescript
+import { BinaryResponse } from '@apisr/response';
+
+const blob = new Blob(['Hello, World!'], { type: 'text/plain' });
+const response = new BinaryResponse.Base(blob, {
+  status: 200,
+  headers: {
+    'Content-Type': 'text/plain',
+    'Content-Disposition': 'attachment; filename="hello.txt"'
+  }
+});
+```
+
+### Constructor Parameters
+
+<ParamField path="body" type="Binary" required>
+  Binary payload: `Blob`, `ArrayBuffer`, `Uint8Array`, or `ReadableStream`
+</ParamField>
+
+<ParamField path="init" type="ResponseInit">
+  Response initialization options
+  
+  - `status` - HTTP status code (default: 200)
+  - `statusText` - HTTP status text
+  - `headers` - HTTP headers
+</ParamField>
+
+## BinaryResponse.Options
+
+Type alias for binary response initialization options:
+
+```typescript
+interface Options {
+  headers?: HeadersInput;
+  status?: number;
+  statusText?: string;
+}
+```
+
+## Usage with ResponseHandler
+
+The preferred way to create binary responses is through `ResponseHandler.binary()`:
+
+```typescript
+import { createResponseHandler } from '@apisr/response';
+
+const handler = createResponseHandler({});
+
+const blob = new Blob(['PDF content'], { type: 'application/pdf' });
+const response = handler.binary(blob, {
+  headers: {
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': 'attachment; filename="document.pdf"'
+  }
+});
+```
+
+## Common Use Cases
+
+### Serving PDF Files
+
+```typescript
+import { createResponseHandler } from '@apisr/response';
+
+const handler = createResponseHandler({});
+
+export const GET = async () => {
+  const pdfBuffer = await generatePDF();
+  
+  return handler.binary(pdfBuffer, {
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'attachment; filename="report.pdf"'
+    }
+  });
+};
+```
+
+### Serving Images
+
+```typescript
+import { createResponseHandler } from '@apisr/response';
+
+const handler = createResponseHandler({});
+
+export const GET = async ({ params }) => {
+  const imageBuffer = await db.images.getById(params.id);
+  
+  return handler.binary(imageBuffer, {
+    headers: {
+      'Content-Type': 'image/png',
+      'Cache-Control': 'public, max-age=31536000'
+    }
+  });
+};
+```
+
+### Streaming Large Files
+
+```typescript
+import { createResponseHandler } from '@apisr/response';
+
+const handler = createResponseHandler({});
+
+export const GET = async ({ params }) => {
+  const stream = await getFileStream(params.id);
+  
+  return handler.binary(stream, {
+    headers: {
+      'Content-Type': 'video/mp4',
+      'Content-Disposition': 'inline'
+    }
+  });
+};
+```
+
+### CSV Export
+
+```typescript
+import { createResponseHandler } from '@apisr/response';
+
+const handler = createResponseHandler({});
+
+export const GET = async () => {
+  const data = await db.users.findMany();
+  const csv = convertToCSV(data);
+  const blob = new Blob([csv], { type: 'text/csv' });
+  
+  return handler.binary(blob, {
+    headers: {
+      'Content-Type': 'text/csv',
+      'Content-Disposition': 'attachment; filename="users.csv"'
+    }
+  });
+};
+```
+
+### Excel Export
+
+```typescript
+import { createResponseHandler } from '@apisr/response';
+import * as XLSX from 'xlsx';
+
+const handler = createResponseHandler({});
+
+export const GET = async () => {
+  const data = await db.sales.findMany();
+  
+  const worksheet = XLSX.utils.json_to_sheet(data);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Sales');
+  
+  const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+  
+  return handler.binary(buffer, {
+    headers: {
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="sales.xlsx"'
+    }
+  });
+};
+```
+
+## Custom Binary Data Mapping
+
+Configure how binary data is processed before sending:
+
+```typescript
+import { createResponseHandler, options } from '@apisr/response';
+
+const handler = createResponseHandler((opts) => ({
+  binary: opts.binary({
+    mapData: (data) => {
+      // Compress or transform binary data
+      return compressBinary(data);
+    },
+    headers: (data) => ({
+      'Content-Length': data.byteLength?.toString() ?? '0',
+      'X-Processed': 'true'
+    })
+  })
+}));
+```
+
+## Working with Different Binary Types
+
+### From Blob
+
+```typescript
+const blob = new Blob(['content'], { type: 'text/plain' });
+const response = handler.binary(blob);
+```
+
+### From ArrayBuffer
+
+```typescript
+const buffer = new ArrayBuffer(8);
+const response = handler.binary(buffer, {
+  headers: { 'Content-Type': 'application/octet-stream' }
+});
+```
+
+### From Uint8Array
+
+```typescript
+const uint8 = new Uint8Array([72, 101, 108, 108, 111]);
+const response = handler.binary(uint8, {
+  headers: { 'Content-Type': 'application/octet-stream' }
+});
+```
+
+### From ReadableStream
+
+```typescript
+const stream = new ReadableStream({
+  start(controller) {
+    controller.enqueue(new Uint8Array([1, 2, 3]));
+    controller.close();
+  }
+});
+const response = handler.binary(stream);
+```
+
+## Content-Disposition Headers
+
+### Inline Display
+
+Display content in the browser (e.g., images, PDFs):
+
+```typescript
+const response = handler.binary(imageBlob, {
+  headers: {
+    'Content-Type': 'image/jpeg',
+    'Content-Disposition': 'inline'
+  }
+});
+```
+
+### Force Download
+
+Force browser to download the file:
+
+```typescript
+const response = handler.binary(pdfBlob, {
+  headers: {
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': 'attachment; filename="document.pdf"'
+  }
+});
+```
+
+### With Custom Filename
+
+```typescript
+const filename = `report-${new Date().toISOString()}.pdf`;
+const response = handler.binary(pdfBlob, {
+  headers: {
+    'Content-Disposition': `attachment; filename="${filename}"`
+  }
+});
+```
+
+## Common MIME Types
+
+```typescript
+const mimeTypes = {
+  pdf: 'application/pdf',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  mp4: 'video/mp4',
+  mp3: 'audio/mpeg',
+  zip: 'application/zip',
+  csv: 'text/csv',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+};
+```
+
+## Security Considerations
+
+### Validate File Types
+
+```typescript
+export const GET = async ({ params }) => {
+  const file = await db.files.getById(params.id);
+  
+  const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];
+  if (!allowedTypes.includes(file.mimeType)) {
+    return handler.fail('badRequest');
+  }
+  
+  return handler.binary(file.data, {
+    headers: { 'Content-Type': file.mimeType }
+  });
+};
+```
+
+### Sanitize Filenames
+
+```typescript
+function sanitizeFilename(filename: string): string {
+  return filename.replace(/[^a-zA-Z0-9.-]/g, '_');
+}
+
+const safeFilename = sanitizeFilename(userProvidedFilename);
+const response = handler.binary(blob, {
+  headers: {
+    'Content-Disposition': `attachment; filename="${safeFilename}"`
+  }
+});
+```

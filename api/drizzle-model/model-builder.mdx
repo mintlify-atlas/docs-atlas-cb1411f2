@@ -1,0 +1,199 @@
+---
+title: "modelBuilder"
+description: "Create reusable model instances for Drizzle ORM tables with type-safe query methods and custom formatting."
+---
+
+## Overview
+
+The `modelBuilder` function creates a factory for building type-safe model instances from your Drizzle ORM schema. Each model provides a chainable API for queries, mutations, and result refinement.
+
+## Syntax
+
+```ts
+const model = modelBuilder({
+  db,
+  schema,
+  relations,
+  dialect,
+});
+```
+
+## Parameters
+
+<ParamField path="db" type="DrizzleDB" required>
+  Drizzle database instance created via `drizzle()` from your chosen driver (node-postgres, better-sqlite3, etc.).
+</ParamField>
+
+<ParamField path="schema" type="Record<string, Table>" required>
+  Your Drizzle schema object containing all table definitions.
+</ParamField>
+
+<ParamField path="relations" type="Relations" required>
+  Drizzle relations definition (v2 format). Required for `.with()` relation loading.
+  
+  See: [Drizzle Relations v2](https://orm.drizzle.team/docs/relations-v1-v2)
+</ParamField>
+
+<ParamField path="dialect" type="'PostgreSQL' | 'MySQL' | 'SQLite'" required>
+  Database dialect. Affects SQL generation and mutation return behavior.
+</ParamField>
+
+## Return Value
+
+Returns a model factory function with this signature:
+
+```ts
+(tableName: string, options?: ModelOptions) => Model
+```
+
+### Model Options
+
+The second parameter accepts optional configuration:
+
+<ParamField path="format" type="(row: TableRow) => any">
+  Transform function applied to every query result. Use for date parsing, field sanitization, or type coercion.
+  
+  ```ts
+  const postModel = model("post", {
+    format(row) {
+      return {
+        ...row,
+        createdAt: new Date(row.createdAt),
+        updatedAt: row.updatedAt ? new Date(row.updatedAt) : null,
+      };
+    },
+  });
+  ```
+</ParamField>
+
+<ParamField path="where" type="WhereClause">
+  Default where condition applied to all queries. Useful for soft deletes or tenant isolation.
+  
+  ```ts
+  const activeUsers = model("user", {
+    where: { isDeleted: esc(false) },
+  });
+  ```
+</ParamField>
+
+<ParamField path="methods" type="Record<string, Function>">
+  Custom methods to attach to the model instance.
+  
+  ```ts
+  const userModel = model("user", {
+    methods: {
+      async byEmail(email: string) {
+        return await this.where({ email: esc(email) }).findFirst();
+      },
+    },
+  });
+  
+  // Usage
+  await userModel.byEmail("alex@example.com");
+  ```
+</ParamField>
+
+## Examples
+
+### Basic Setup
+
+```ts
+import { modelBuilder } from "@apisr/drizzle-model";
+import { drizzle } from "drizzle-orm/node-postgres";
+import * as schema from "./schema";
+import { relations } from "./relations";
+
+const db = drizzle(process.env.DATABASE_URL!, { schema, relations });
+
+const model = modelBuilder({
+  db,
+  schema,
+  relations,
+  dialect: "PostgreSQL",
+});
+
+// Create models
+const userModel = model("user", {});
+const postModel = model("post", {});
+```
+
+### With Formatting
+
+```ts
+const postModel = model("post", {
+  format(row) {
+    return {
+      ...row,
+      createdAt: new Date(row.createdAt),
+      updatedAt: row.updatedAt ? new Date(row.updatedAt) : null,
+      // Remove internal fields
+      internalStatus: undefined,
+    };
+  },
+});
+
+const post = await postModel.findFirst();
+// post.createdAt is Date, not string
+```
+
+### With Default Filters
+
+```ts
+const activeUsers = model("user", {
+  where: { isVerified: esc(true), isDeleted: esc(false) },
+});
+
+// All queries include the default filter
+const users = await activeUsers.findMany();
+// SELECT * FROM user WHERE is_verified = true AND is_deleted = false
+```
+
+### With Custom Methods
+
+```ts
+const userModel = model("user", {
+  methods: {
+    async byEmail(email: string) {
+      return await this.where({ email: esc(email) }).findFirst();
+    },
+    async adults() {
+      return await this.where({ age: esc.gte(18) }).findMany();
+    },
+  },
+});
+
+const user = await userModel.byEmail("alex@example.com");
+const adults = await userModel.adults();
+```
+
+## Model Methods
+
+Once created, model instances expose the full query API:
+
+- [Query Methods](/api/drizzle-model/queries) - `findMany`, `findFirst`, `count`, `where`
+- [Mutation Methods](/api/drizzle-model/mutations) - `insert`, `update`, `delete`, `upsert`
+- [Refinement Methods](/api/drizzle-model/refinement) - `select`, `exclude`, `with`, `omit`, `raw`, `safe`
+- [Transaction API](/api/drizzle-model/transactions) - `.db()` method
+
+## Type Safety
+
+The model factory infers all types from your Drizzle schema:
+
+```ts
+// TypeScript knows all column names and types
+await userModel.where({ 
+  name: esc("Alex"),  // ✅ 'name' is a valid column
+  age: esc.gte(18),   // ✅ 'age' is a number column
+  // invalid: esc("foo") // ❌ Type error: age expects number
+}).findMany();
+```
+
+## Notes
+
+<Note>
+  Requires Drizzle ORM beta versions (`^1.0.0-beta.2-86f844e` or later) with Relations v2.
+</Note>
+
+<Warning>
+  The `dialect` parameter affects mutation return behavior. PostgreSQL and SQLite support `.returning()`, while MySQL uses insert ID fallback.
+</Warning>

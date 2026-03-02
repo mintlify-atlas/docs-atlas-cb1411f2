@@ -1,0 +1,320 @@
+---
+title: Zod Utilities
+description: Extended Zod utilities for source-based field resolution
+---
+
+## Overview
+
+The `@apisr/zod` package extends Zod with additional utilities for metadata-based field resolution, allowing you to specify where field values should come from in HTTP requests.
+
+## Extended Zod Instance
+
+Import the extended Zod instance that includes the `.from()` method:
+
+```typescript
+import { z } from "@apisr/zod";
+// or
+import { zod } from "@apisr/zod";
+```
+
+To access the original Zod without extensions:
+
+```typescript
+import { _z } from "@apisr/zod";
+```
+
+## .from() Method
+
+The `.from()` method allows you to specify where a field's value should be extracted from in an HTTP request.
+
+### Signature
+
+```typescript
+.from(
+  source: "query" | "params" | "body" | "headers" | "handler.payload",
+  options?: { key?: string | string[] }
+)
+```
+
+### Parameters
+
+<ParamField path="source" type="string" required>
+  The source location for the field value:
+  - `"query"` - URL query parameters
+  - `"params"` - URL route parameters
+  - `"body"` - Request body
+  - `"headers"` - HTTP headers
+  - `"handler.payload"` - Previous handler's payload
+</ParamField>
+
+<ParamField path="options.key" type="string | string[]">
+  Custom key(s) to use when extracting the value. Supports:
+  - Single string: `{ key: "user_id" }`
+  - Array of strings (with fallback): `{ key: ["id", "userId"] }`
+  - Dot notation for nested values: `{ key: "customer.name" }`
+  
+  If not provided, uses the field name from the schema.
+</ParamField>
+
+### Examples
+
+#### Basic Source Mapping
+
+```typescript
+import { z } from "@apisr/zod";
+
+const schema = z.object({
+  // Field name matches source key
+  userId: z.string().from("params"),
+  search: z.string().from("query"),
+  name: z.string().from("body"),
+});
+```
+
+#### Custom Keys
+
+```typescript
+const schema = z.object({
+  // Map to different key in source
+  userId: z.string().from("params", { key: "id" }),
+  token: z.string().from("headers", { key: "authorization" }),
+});
+```
+
+#### Fallback Keys
+
+```typescript
+const schema = z.object({
+  // Try "id" first, fall back to "userId", then "user_id"
+  userId: z.string().from("params", { key: ["id", "userId", "user_id"] }),
+});
+```
+
+#### Nested Values
+
+```typescript
+const schema = z.object({
+  // Extract from nested object using dot notation
+  userName: z.string().from("body", { key: "user.name" }),
+  customerEmail: z.string().from("body", { key: "customer.contact.email" }),
+});
+```
+
+## resolveZodSchemaMeta
+
+Extracts the `.from()` metadata from a Zod object schema.
+
+### Signature
+
+```typescript
+function resolveZodSchemaMeta(
+  schema: z.ZodObject<any>
+): SchemaFieldsMeta
+```
+
+### Return Type
+
+```typescript
+type SchemaFieldsMeta = Record<string, FieldMeta>
+
+interface FieldMeta {
+  from: string;
+  key?: string | string[];
+}
+```
+
+### Example
+
+```typescript
+import { resolveZodSchemaMeta, z } from "@apisr/zod";
+
+const schema = z.object({
+  name: z.string().from("body"),
+  id: z.string().from("params"),
+  token: z.string().from("headers", { key: "authorization" }),
+});
+
+const meta = resolveZodSchemaMeta(schema);
+// {
+//   name: { from: "body" },
+//   id: { from: "params" },
+//   token: { from: "headers", key: "authorization" }
+// }
+```
+
+## resolveZodSchemaFromSources
+
+Resolves field values from multiple sources based on the schema's `.from()` metadata.
+
+### Signature
+
+```typescript
+function resolveZodSchemaFromSources(
+  schema: z.ZodObject<any>,
+  sources: Record<string, Record<string, unknown>>
+): Record<string, unknown>
+```
+
+### Parameters
+
+<ParamField path="schema" type="z.ZodObject<any>" required>
+  The Zod object schema with `.from()` metadata
+</ParamField>
+
+<ParamField path="sources" type="Record<string, Record<string, unknown>>" required>
+  A map where keys match the `from` values (e.g., `"query"`, `"params"`, `"body"`) and values are the corresponding data objects
+</ParamField>
+
+### Example
+
+```typescript
+import { resolveZodSchemaFromSources, z } from "@apisr/zod";
+
+const schema = z.object({
+  name: z.string().from("body"),
+  id: z.string().from("params"),
+  search: z.string().from("query"),
+  auth: z.string().from("headers", { key: "authorization" }),
+  prevName: z.string().from("handler.payload", { key: "name" }),
+});
+
+const resolved = resolveZodSchemaFromSources(schema, {
+  body: { name: "John" },
+  params: { id: "42" },
+  query: { search: "test" },
+  headers: { authorization: "Bearer token123" },
+  "handler.payload": { name: "prev-value" },
+});
+
+// Result:
+// {
+//   name: "John",
+//   id: "42",
+//   search: "test",
+//   auth: "Bearer token123",
+//   prevName: "prev-value"
+// }
+```
+
+### With Nested Values
+
+```typescript
+const schema = z.object({
+  userName: z.string().from("body", { key: "user.name" }),
+  userEmail: z.string().from("body", { key: "user.contact.email" }),
+});
+
+const resolved = resolveZodSchemaFromSources(schema, {
+  body: {
+    user: {
+      name: "John Doe",
+      contact: {
+        email: "john@example.com",
+      },
+    },
+  },
+});
+
+// Result:
+// {
+//   userName: "John Doe",
+//   userEmail: "john@example.com"
+// }
+```
+
+## extendZod
+
+Manually extend a Zod instance with the `.from()` method. This is automatically applied to the exported `z` instance.
+
+### Signature
+
+```typescript
+function extendZod(zod: typeof z): ExtendResult
+```
+
+### Example
+
+```typescript
+import { extendZod } from "@apisr/zod";
+import z from "zod";
+
+const extendedZod = extendZod(z);
+
+const schema = extendedZod.object({
+  id: extendedZod.string().from("params"),
+});
+```
+
+## Type Definitions
+
+### FromKey
+
+```typescript
+type FromKey = "query" | "params" | "body" | "headers" | "handler.payload";
+```
+
+### FromOptions
+
+```typescript
+interface FromOptions {
+  key: string | string[];
+}
+```
+
+### FieldMeta
+
+```typescript
+interface FieldMeta {
+  from: string;
+  key?: string | string[];
+}
+```
+
+### SchemaFieldsMeta
+
+```typescript
+type SchemaFieldsMeta = Record<string, FieldMeta>;
+```
+
+## Complete Example
+
+Here's a complete example showing how to use Zod utilities with a handler:
+
+```typescript
+import { z } from "@apisr/zod";
+import { handler } from "@apisr/core";
+import { checkSchema } from "@apisr/schema";
+
+// Define schema with source mappings
+const getUserSchema = z.object({
+  userId: z.string().from("params", { key: "id" }),
+  includeProfile: z.boolean().optional().from("query", { key: "profile" }),
+  authorization: z.string().from("headers", { key: "authorization" }),
+});
+
+// Create handler
+const getUser = handler(
+  async ({ payload }) => {
+    // payload is validated and typed
+    const user = await db.users.findById(payload.userId);
+    
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    return {
+      id: user.id,
+      username: user.username,
+      ...(payload.includeProfile && { profile: user.profile }),
+    };
+  },
+  {
+    payload: getUserSchema,
+  }
+);
+```
+
+## Related
+
+- [checkSchema](/api/schema/check-schema)
+- [Type Inference](/api/schema/type-inference)

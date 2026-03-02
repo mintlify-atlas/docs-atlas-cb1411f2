@@ -1,0 +1,326 @@
+---
+title: ErrorResponse
+description: Type-safe error responses with built-in error types and custom error handling
+---
+
+The `ErrorResponse` class extends the native `Error` class to provide structured, type-safe error responses with HTTP status codes and custom error data.
+
+## ErrorResponse.Base
+
+A structured error response class that includes status information, metadata, and custom output.
+
+```typescript
+import { ErrorResponse } from '@apisr/response';
+
+const error = new ErrorResponse.Base({
+  name: 'ValidationError',
+  meta: { requestId: 'req-123' },
+  output: { message: 'Invalid input', field: 'email' },
+  status: 422,
+  statusText: 'Unprocessable Entity'
+});
+```
+
+### Constructor Parameters
+
+<ParamField path="name" type="TName" required>
+  Error name identifier (e.g., "notFound", "unauthorized", "validationError")
+</ParamField>
+
+<ParamField path="meta" type="TMeta" required>
+  Metadata object containing contextual information (e.g., requestId, timestamp)
+</ParamField>
+
+<ParamField path="output" type="TOutput" required>
+  Error output object with error details (message, code, additional data)
+</ParamField>
+
+<ParamField path="status" type="number" required>
+  HTTP status code (e.g., 404, 500)
+</ParamField>
+
+<ParamField path="statusText" type="string" required>
+  HTTP status text (e.g., "Not Found", "Internal Server Error")
+</ParamField>
+
+### Properties
+
+<ParamField path="name" type="TName" readonly>
+  Error name identifier
+</ParamField>
+
+<ParamField path="meta" type="TMeta" readonly>
+  Metadata associated with the error
+</ParamField>
+
+<ParamField path="output" type="TOutput" readonly>
+  Structured error output data
+</ParamField>
+
+<ParamField path="status" type="number" readonly>
+  HTTP status code
+</ParamField>
+
+<ParamField path="statusText" type="string" readonly>
+  HTTP status text
+</ParamField>
+
+## Built-in Error Types
+
+The response handler includes 7 built-in error types that can be used immediately:
+
+### unauthorized
+
+401 Unauthorized - User is not authenticated
+
+```typescript
+const response = handler.fail('unauthorized');
+// Status: 401
+// Output: { message: 'Unauthorized', code: 'UNAUTHORIZED', name: 'UnauthorizedError' }
+```
+
+### forbidden
+
+403 Forbidden - User is authenticated but lacks permissions
+
+```typescript
+const response = handler.fail('forbidden');
+// Status: 403
+// Output: { message: 'Forbidden', code: 'FORBIDDEN', name: 'ForbiddenError' }
+```
+
+### notFound
+
+404 Not Found - Requested resource does not exist
+
+```typescript
+const response = handler.fail('notFound');
+// Status: 404
+// Output: { message: 'Not Found', code: 'NOT_FOUND', name: 'NotFoundError' }
+```
+
+### badRequest
+
+400 Bad Request - Invalid request parameters
+
+```typescript
+const response = handler.fail('badRequest');
+// Status: 400
+// Output: { message: 'Bad Request', code: 'BAD_REQUEST', name: 'BadRequestError' }
+```
+
+### conflict
+
+409 Conflict - Request conflicts with current state
+
+```typescript
+const response = handler.fail('conflict');
+// Status: 409
+// Output: { message: 'Conflict', code: 'CONFLICT', name: 'ConflictError' }
+```
+
+### tooMany
+
+429 Too Many Requests - Rate limit exceeded
+
+```typescript
+const response = handler.fail('tooMany');
+// Status: 429
+// Output: { message: 'Too Many Requests', code: 'TOO_MANY_REQUESTS', name: 'TooManyRequestsError' }
+```
+
+### internal
+
+500 Internal Server Error - Unexpected server error
+
+```typescript
+const response = handler.fail('internal');
+// Status: 500
+// Output: { message: 'Internal Server Error', code: 'INTERNAL_SERVER_ERROR', name: 'InternalServerError' }
+```
+
+## Default Error Structure
+
+All built-in errors follow this structure:
+
+```typescript
+interface DefaultError {
+  message: string;
+  code: string;
+  name: string;
+  cause?: unknown;
+  stack?: string[];
+}
+```
+
+## Defining Custom Errors
+
+Use `defineError()` to create custom error types with validation:
+
+```typescript
+import { createResponseHandler } from '@apisr/response';
+import { z } from '@apisr/zod';
+
+const handler = createResponseHandler({}).defineError(
+  'validationError',
+  ({ input, meta }) => ({
+    message: `Validation failed: ${input.message}`,
+    code: 'VALIDATION_ERROR',
+    field: input.field,
+    requestId: meta.requestId
+  }),
+  {
+    status: 422,
+    statusText: 'Unprocessable Entity',
+    input: z.object({
+      field: z.string(),
+      message: z.string()
+    })
+  }
+);
+
+// Use the custom error
+const response = handler.fail('validationError', {
+  field: 'email',
+  message: 'Invalid email format'
+});
+```
+
+## Error with Cause
+
+Include the original error as a cause:
+
+```typescript
+export const GET = async () => {
+  try {
+    const data = await fetchData();
+    return handler.json(data);
+  } catch (err) {
+    return handler.fail('internal', { cause: err });
+  }
+};
+```
+
+## Custom Error Mapping
+
+Transform errors globally using `mapDefaultError`:
+
+```typescript
+import { createResponseHandler, options } from '@apisr/response';
+
+const handler = createResponseHandler((opts) => ({
+  error: opts.error({
+    mapDefaultError: (error) => ({
+      ...error,
+      // Add additional fields
+      timestamp: Date.now(),
+      environment: process.env.NODE_ENV
+    })
+  })
+}));
+```
+
+## Error Handler Options
+
+When defining custom errors, you can specify:
+
+<ParamField path="status" type="number">
+  HTTP status code for the error
+</ParamField>
+
+<ParamField path="statusText" type="string">
+  HTTP status text for the error
+</ParamField>
+
+<ParamField path="input" type="Schema">
+  Zod schema for validating error input
+</ParamField>
+
+<ParamField path="validationType" type="'parse' | 'assert'">
+  Validation type (default: "parse")
+  
+  - `parse` - Validate and transform input
+  - `assert` - Validate input and throw if invalid
+</ParamField>
+
+## Static Error Output
+
+Define errors with static output (no handler function):
+
+```typescript
+const handler = createResponseHandler({}).defineError(
+  'maintenance',
+  {
+    message: 'Service is under maintenance',
+    code: 'MAINTENANCE',
+    name: 'MaintenanceError'
+  },
+  {
+    status: 503,
+    statusText: 'Service Unavailable'
+  }
+);
+
+const response = handler.fail('maintenance');
+```
+
+## Real-World Example
+
+```typescript
+import { createResponseHandler } from '@apisr/response';
+import { z } from '@apisr/zod';
+
+const handler = createResponseHandler({})
+  .defineError(
+    'validationError',
+    ({ input }) => ({
+      message: 'Validation failed',
+      code: 'VALIDATION_ERROR',
+      errors: input.errors
+    }),
+    {
+      status: 422,
+      input: z.object({
+        errors: z.array(z.object({
+          field: z.string(),
+          message: z.string()
+        }))
+      })
+    }
+  )
+  .defineError(
+    'rateLimitExceeded',
+    ({ input, meta }) => ({
+      message: 'Rate limit exceeded',
+      code: 'RATE_LIMIT_EXCEEDED',
+      retryAfter: input.retryAfter,
+      requestId: meta.requestId
+    }),
+    {
+      status: 429,
+      input: z.object({
+        retryAfter: z.number()
+      })
+    }
+  );
+
+export const POST = async (request: Request) => {
+  const body = await request.json();
+  
+  // Validation
+  const errors = validateInput(body);
+  if (errors.length > 0) {
+    return handler.fail('validationError', { errors });
+  }
+  
+  // Rate limiting
+  const remaining = await checkRateLimit(request);
+  if (remaining === 0) {
+    return handler.fail('rateLimitExceeded', { retryAfter: 60 });
+  }
+  
+  // Success
+  const result = await processData(body);
+  return handler.json(result);
+};
+```

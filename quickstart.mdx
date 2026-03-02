@@ -1,80 +1,505 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick start
+description: Build your first application with Apiser's type-safe models and controllers in minutes
 ---
 
-## Get started in three steps
+This guide walks you through building a complete API with Apiser's most important package: `@apisr/drizzle-model`.
 
-Get your documentation site running locally and make your first customization.
+## What you'll build
 
-### Step 1: Set up your local environment
+A type-safe REST API with:
+- Database models with automatic type inference
+- Progressive query building
+- Relation loading
+- Error-safe execution
+- Custom formatting and business logic
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+## Setup your project
+
+<Steps>
+  <Step title="Create a new project">
+    Initialize a new Node.js project:
+
+    ```bash
+    mkdir apiser-quickstart
+    cd apiser-quickstart
+    npm init -y
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    Install Apiser and Drizzle ORM:
+
+    <CodeGroup>
+    ```bash npm
+    npm install @apisr/drizzle-model drizzle-orm@beta pg
+    npm install -D @types/pg drizzle-kit@beta typescript tsx
+    ```
+
+    ```bash bun
+    bun add @apisr/drizzle-model drizzle-orm@beta pg
+    bun add -D @types/pg drizzle-kit@beta typescript
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Configure TypeScript">
+    Create a `tsconfig.json` file:
+
+    ```json tsconfig.json
+    {
+      "compilerOptions": {
+        "target": "ES2022",
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+## Define your database schema
+
+Create a schema file with Drizzle ORM:
+
+```ts src/schema.ts
+import { pgTable, serial, text, integer, timestamp, boolean } from "drizzle-orm/pg-core";
+
+export const user = pgTable("user", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  age: integer("age").notNull(),
+  isVerified: boolean("is_verified").default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const post = pgTable("post", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  content: text("content"),
+  authorId: integer("author_id").notNull().references(() => user.id),
+  published: boolean("published").default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at"),
+});
+```
+
+## Define relations
+
+<Warning>
+Apiser requires Drizzle ORM relations v2. Make sure you're using the beta version.
+</Warning>
+
+```ts src/relations.ts
+import { relations } from "drizzle-orm";
+import { user, post } from "./schema";
+
+export const userRelations = relations(user, ({ many }) => ({
+  posts: many(post),
+}));
+
+export const postRelations = relations(post, ({ one }) => ({
+  author: one(user, {
+    fields: [post.authorId],
+    references: [user.id],
+  }),
+}));
+```
+
+## Connect to your database
+
+Create a database connection:
+
+```ts src/db.ts
+import { drizzle } from "drizzle-orm/node-postgres";
+import * as schema from "./schema";
+import * as relations from "./relations";
+
+export const db = drizzle(process.env.DATABASE_URL!, {
+  schema: { ...schema, ...relations },
+});
+```
+
+<Note>
+Set your `DATABASE_URL` environment variable to your PostgreSQL connection string.
+</Note>
+
+## Create your first model
+
+Now for the exciting part - create type-safe models with `@apisr/drizzle-model`:
+
+```ts src/models.ts
+import { modelBuilder, esc } from "@apisr/drizzle-model";
+import { db } from "./db";
+import * as schema from "./schema";
+import { userRelations, postRelations } from "./relations";
+
+// Create the model builder
+const model = modelBuilder({
+  db,
+  schema,
+  relations: { user: userRelations, post: postRelations },
+  dialect: "PostgreSQL",
+});
+
+// Create a user model with custom formatting
+export const userModel = model("user", {
+  format(row) {
+    return {
+      ...row,
+      // Convert boolean for consistency
+      isVerified: Boolean(row.isVerified),
+      // Parse dates
+      createdAt: new Date(row.createdAt),
+    };
+  },
+});
+
+// Create a post model with custom formatting
+export const postModel = model("post", {
+  format(row) {
+    return {
+      ...row,
+      published: Boolean(row.published),
+      createdAt: new Date(row.createdAt),
+      updatedAt: row.updatedAt ? new Date(row.updatedAt) : null,
+    };
+  },
+});
+```
+
+## Use your models
+
+Now you can use your models with a progressive, type-safe API:
+
+### Basic queries
+
+```ts src/examples/basic.ts
+import { userModel, postModel } from "./models";
+import { esc } from "@apisr/drizzle-model";
+
+// Find first user
+const user = await userModel.findFirst();
+
+// Find user by email
+const alex = await userModel
+  .where({ email: esc("alex@example.com") })
+  .findFirst();
+
+// Find all verified users
+const verified = await userModel
+  .where({ isVerified: esc(true) })
+  .findMany();
+
+// Count total users
+const total = await userModel.count();
+```
+
+### Progressive query building
+
+Chain methods to build complex queries step by step:
+
+```ts
+// Find users with specific fields and relations
+const users = await userModel
+  .where({ isVerified: esc(true) })
+  .findMany()
+  .with({ posts: true })
+  .select({ id: true, name: true, email: true });
+
+// Each user has type: { id: number; name: string; email: string; posts: Post[] }
+```
+
+### Insert data
+
+```ts
+// Insert and return the new record
+const newUser = await userModel
+  .insert({
+    name: "Alice",
+    email: "alice@example.com",
+    age: 28,
+  })
+  .returnFirst();
+
+console.log(newUser.id); // Auto-incrementing ID
+
+// Insert multiple records
+const posts = await postModel
+  .insert([
+    { title: "First Post", authorId: newUser.id, content: "Hello world" },
+    { title: "Second Post", authorId: newUser.id, content: "More content" },
+  ])
+  .return();
+```
+
+### Update records
+
+```ts
+// Update and return the updated record
+const updated = await userModel
+  .where({ id: esc(1) })
+  .update({ isVerified: true })
+  .returnFirst();
+
+// Update multiple records
+await postModel
+  .where({ authorId: esc(1) })
+  .update({ published: true });
+```
+
+### Load relations
+
+```ts
+// Load user with their posts
+const userWithPosts = await userModel
+  .where({ id: esc(1) })
+  .findFirst()
+  .with({ posts: true });
+
+// Load nested relations
+const posts = await postModel
+  .findMany()
+  .with({
+    author: true,
+  });
+
+// Filter relations
+const users = await userModel
+  .findMany()
+  .with({
+    posts: postModel.where({ published: esc(true) }),
+  });
+```
+
+### Error-safe execution
+
+Use `.safe()` for error-as-value patterns:
+
+```ts
+const result = await userModel
+  .where({ email: esc("unknown@example.com") })
+  .findFirst()
+  .safe();
+
+if (result.error) {
+  console.error("Failed to fetch user:", result.error);
+} else {
+  console.log("User found:", result.data);
+}
+```
+
+### Transactions
+
+Bind models to transactions:
+
+```ts
+await db.transaction(async (tx) => {
+  const txUser = userModel.db(tx);
+  const txPost = postModel.db(tx);
+  
+  const user = await txUser.insert({
+    name: "Bob",
+    email: "bob@example.com",
+    age: 30,
+  }).returnFirst();
+  
+  await txPost.insert({
+    title: "Bob's First Post",
+    content: "Transaction example",
+    authorId: user.id,
+  });
+});
+```
+
+### Custom methods
+
+Extend models with custom business logic:
+
+```ts
+export const userModel = model("user", {
+  methods: {
+    async byEmail(email: string) {
+      return await userModel
+        .where({ email: esc(email) })
+        .findFirst();
+    },
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    async adults() {
+      return await userModel
+        .where({ age: esc.gte(18) })
+        .findMany();
+    },
+  },
+});
 
-### Step 2: Deploy your changes
+// Use custom methods
+const user = await userModel.byEmail("alice@example.com");
+const adults = await userModel.adults();
+```
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+## Advanced features
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+### Chainable operators
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+Use chainable methods for complex conditions:
 
-### Step 3: Go live
+```ts
+import { esc } from "@apisr/drizzle-model";
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+// Greater than or equal
+const adults = await userModel
+  .where({ age: esc.gte(18) })
+  .findMany();
+
+// LIKE pattern matching
+const alexUsers = await userModel
+  .where({ name: esc.like("Alex%") })
+  .findMany();
+
+// IN operator
+const specific = await userModel
+  .where({ id: esc.in([1, 2, 3]) })
+  .findMany();
+
+// BETWEEN
+const youngAdults = await userModel
+  .where({ age: esc.between(18, 30) })
+  .findMany();
+```
+
+### Skip formatting
+
+Bypass the format function when needed:
+
+```ts
+const rawUser = await userModel
+  .findFirst()
+  .raw();
+
+// Returns the raw database row without formatting
+```
+
+### Upsert operations
+
+```ts
+const user = await userModel
+  .upsert({
+    insert: {
+      name: "Charlie",
+      email: "charlie@example.com",
+      age: 25,
+    },
+    update: {
+      age: 26,
+    },
+    target: schema.user.email,
+  })
+  .returnFirst();
+```
+
+## Complete example
+
+Here's a complete working example:
+
+```ts src/index.ts
+import { modelBuilder, esc } from "@apisr/drizzle-model";
+import { drizzle } from "drizzle-orm/node-postgres";
+import * as schema from "./schema";
+import { userRelations, postRelations } from "./relations";
+
+const db = drizzle(process.env.DATABASE_URL!, {
+  schema: { ...schema, ...relations },
+});
+
+const model = modelBuilder({
+  db,
+  schema,
+  relations: { user: userRelations, post: postRelations },
+  dialect: "PostgreSQL",
+});
+
+const userModel = model("user", {
+  format(row) {
+    return {
+      ...row,
+      isVerified: Boolean(row.isVerified),
+      createdAt: new Date(row.createdAt),
+    };
+  },
+});
+
+const postModel = model("post", {
+  format(row) {
+    return {
+      ...row,
+      published: Boolean(row.published),
+      createdAt: new Date(row.createdAt),
+      updatedAt: row.updatedAt ? new Date(row.updatedAt) : null,
+    };
+  },
+});
+
+async function main() {
+  // Create a user
+  const user = await userModel
+    .insert({
+      name: "Alice",
+      email: "alice@example.com",
+      age: 28,
+    })
+    .returnFirst();
+
+  console.log("Created user:", user);
+
+  // Create posts
+  await postModel.insert([
+    { title: "Hello World", content: "First post", authorId: user.id },
+    { title: "TypeScript Tips", content: "Second post", authorId: user.id },
+  ]);
+
+  // Query with relations
+  const userWithPosts = await userModel
+    .where({ id: esc(user.id) })
+    .findFirst()
+    .with({ posts: true });
+
+  console.log("User with posts:", userWithPosts);
+
+  // Safe execution
+  const result = await userModel.findMany().safe();
+
+  if (result.error) {
+    console.error("Error:", result.error);
+  } else {
+    console.log("All users:", result.data);
+  }
+}
+
+main().catch(console.error);
+```
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Drizzle model guide" icon="database" href="/packages/drizzle-model">
+    Explore all features of @apisr/drizzle-model
+  </Card>
+  <Card title="Controller guide" icon="function" href="/packages/controller">
+    Build type-safe request handlers
+  </Card>
+  <Card title="Response Handling" icon="paper-plane" href="/guides/response-handling">
+    Learn about response handling patterns
+  </Card>
+  <Card title="Logging" icon="terminal" href="/guides/logging">
+    Set up structured logging
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+<Tip>
+Remember to use `esc()` for literal values in `.where()` conditions. This ensures type safety and prevents SQL injection.
+</Tip>

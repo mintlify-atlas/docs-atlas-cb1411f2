@@ -1,0 +1,632 @@
+---
+title: "@apisr/response"
+description: "Type-safe response handler for building consistent API responses with validation and error handling"
+---
+
+## Overview
+
+`@apisr/response` provides a unified way to create consistent, type-safe API responses with:
+
+- **JSON responses** with automatic validation and transformation
+- **Error responses** with customizable error handlers
+- **Binary responses** for files and streams
+- **Text responses** for plain text
+- **Meta support** for response metadata
+- **Type-safe error definitions** with payload schemas
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @apisr/response
+```
+
+```bash bun
+bun add @apisr/response
+```
+
+```bash pnpm
+pnpm add @apisr/response
+```
+</CodeGroup>
+
+## Quick Start
+
+### Create a Response Handler
+
+```typescript
+import { createResponseHandler, options } from "@apisr/response";
+import { z } from "zod";
+
+const response = createResponseHandler(
+  options()
+    .json({
+      mapData: (data) => ({
+        result: data,
+        timestamp: new Date().toISOString(),
+      }),
+    })
+    .meta({
+      schema: z.object({
+        requestId: z.string(),
+        version: z.string(),
+      }),
+      default: () => ({
+        requestId: crypto.randomUUID(),
+        version: "1.0.0",
+      }),
+    })
+    .build()
+);
+```
+
+### Send JSON Responses
+
+```typescript
+// Simple JSON response
+const res = response.json({ message: "Hello, world!" });
+
+// With custom status
+const created = response.json(
+  { id: 123, name: "New Item" },
+  { status: 201 }
+);
+```
+
+### Handle Errors
+
+```typescript
+// Define custom errors
+const response = createResponseHandler({})
+  .defineError(
+    "notFound",
+    ({ input }) => ({
+      message: `${input.resource} not found`,
+      code: "NOT_FOUND",
+    }),
+    {
+      status: 404,
+      input: z.object({ resource: z.string() }),
+    }
+  )
+  .defineError(
+    "validation",
+    ({ input }) => ({
+      message: "Validation failed",
+      errors: input.errors,
+      code: "VALIDATION_ERROR",
+    }),
+    {
+      status: 400,
+      input: z.object({ errors: z.array(z.string()) }),
+    }
+  );
+
+// Throw errors
+throw response.fail("notFound", { resource: "User" });
+throw response.fail("validation", {
+  errors: ["Email is required", "Password too short"],
+});
+```
+
+## Core Concepts
+
+### Response Types
+
+<Tabs>
+  <Tab title="JSON">
+    ```typescript
+    const res = response.json(
+      { message: "Success", data: [1, 2, 3] },
+      {
+        status: 200,
+        headers: { "X-Custom": "value" },
+      }
+    );
+    ```
+  </Tab>
+  <Tab title="Text">
+    ```typescript
+    const res = response.text(
+      "Hello, world!",
+      {
+        status: 200,
+        headers: { "Content-Type": "text/plain" },
+      }
+    );
+    ```
+  </Tab>
+  <Tab title="Binary">
+    ```typescript
+    const res = response.binary(
+      new Blob([buffer]),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/pdf" },
+      }
+    );
+    ```
+  </Tab>
+  <Tab title="Error">
+    ```typescript
+    throw response.fail("notFound", { resource: "User" });
+    ```
+  </Tab>
+</Tabs>
+
+### Options Builder
+
+Use the options builder for type-safe configuration:
+
+```typescript
+import { options } from "@apisr/response";
+
+const response = createResponseHandler(
+  options()
+    .json({
+      mapData: (data) => ({
+        success: true,
+        data,
+      }),
+    })
+    .error({
+      mapError: ({ error, parsedError }) => {
+        if (parsedError) return parsedError;
+        return {
+          message: error?.message ?? "Unknown error",
+          code: "INTERNAL_ERROR",
+        };
+      },
+    })
+    .meta({
+      schema: z.object({
+        timestamp: z.string(),
+      }),
+      default: () => ({
+        timestamp: new Date().toISOString(),
+      }),
+    })
+    .build()
+);
+```
+
+## JSON Responses
+
+### Data Mapping
+
+Transform response data before sending:
+
+```typescript
+const response = createResponseHandler({
+  json: {
+    mapData: (data) => ({
+      success: true,
+      result: data,
+      timestamp: Date.now(),
+    }),
+  },
+});
+
+// Input: { message: "Hello" }
+// Output: { success: true, result: { message: "Hello" }, timestamp: 1234567890 }
+const res = response.json({ message: "Hello" });
+```
+
+### Custom Headers
+
+```typescript
+const response = createResponseHandler({
+  json: {
+    headers: (ctx) => ({
+      "X-Data-Type": typeof ctx.output,
+      "X-Timestamp": new Date().toISOString(),
+    }),
+  },
+});
+
+const res = response.json({ data: [1, 2, 3] });
+// Includes custom headers automatically
+```
+
+## Error Handling
+
+### Define Custom Errors
+
+```typescript
+const response = createResponseHandler({})
+  .defineError(
+    "unauthorized",
+    () => ({
+      message: "Authentication required",
+      code: "UNAUTHORIZED",
+    }),
+    { status: 401 }
+  )
+  .defineError(
+    "forbidden",
+    ({ input }) => ({
+      message: `Access denied: ${input.reason}`,
+      code: "FORBIDDEN",
+    }),
+    {
+      status: 403,
+      input: z.object({ reason: z.string() }),
+    }
+  )
+  .defineError(
+    "rateLimit",
+    ({ input }) => ({
+      message: "Rate limit exceeded",
+      retryAfter: input.retryAfter,
+      code: "RATE_LIMIT",
+    }),
+    {
+      status: 429,
+      input: z.object({ retryAfter: z.number() }),
+    }
+  );
+```
+
+### Default Errors
+
+Built-in default errors are available:
+
+<Tabs>
+  <Tab title="internal">
+    ```typescript
+    throw response.fail("internal", {
+      cause: new Error("Database connection failed"),
+    });
+    ```
+    500 Internal Server Error
+  </Tab>
+  <Tab title="badRequest">
+    ```typescript
+    throw response.fail("badRequest", {
+      message: "Invalid input",
+    });
+    ```
+    400 Bad Request
+  </Tab>
+  <Tab title="notFound">
+    ```typescript
+    throw response.fail("notFound", {
+      resource: "User",
+    });
+    ```
+    404 Not Found
+  </Tab>
+</Tabs>
+
+### Error Mapping
+
+```typescript
+const response = createResponseHandler({
+  error: {
+    mapError: ({ error, parsedError, meta }) => {
+      // Custom error transformation
+      if (parsedError) {
+        return {
+          ...parsedError.output,
+          meta,
+        };
+      }
+
+      // Handle unexpected errors
+      return {
+        message: "An unexpected error occurred",
+        code: "UNKNOWN",
+        meta,
+      };
+    },
+  },
+});
+```
+
+## Binary Responses
+
+Send files, blobs, or streams:
+
+```typescript
+// Send a file
+const file = await Bun.file("./document.pdf");
+const res = response.binary(file, {
+  headers: {
+    "Content-Type": "application/pdf",
+    "Content-Disposition": 'attachment; filename="document.pdf"',
+  },
+});
+
+// Send a blob
+const blob = new Blob(["Hello, world!"], { type: "text/plain" });
+const res = response.binary(blob);
+
+// Send an ArrayBuffer
+const buffer = new Uint8Array([1, 2, 3, 4]);
+const res = response.binary(buffer);
+
+// Send a stream
+const stream = new ReadableStream({
+  start(controller) {
+    controller.enqueue(new TextEncoder().encode("chunk 1"));
+    controller.enqueue(new TextEncoder().encode("chunk 2"));
+    controller.close();
+  },
+});
+const res = response.binary(stream);
+```
+
+### Binary Data Transformation
+
+```typescript
+const response = createResponseHandler({
+  binary: {
+    mapData: (binary) => {
+      // Transform or validate binary data
+      if (binary instanceof Blob && binary.size > 10_000_000) {
+        throw new Error("File too large");
+      }
+      return binary;
+    },
+    headers: (binary) => ({
+      "Content-Length": String(binary instanceof Blob ? binary.size : 0),
+    }),
+  },
+});
+```
+
+## Metadata
+
+Attach metadata to responses:
+
+```typescript
+const response = createResponseHandler({
+  meta: {
+    schema: z.object({
+      requestId: z.string(),
+      userId: z.string().optional(),
+      timestamp: z.string(),
+    }),
+    default: () => ({
+      requestId: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+    }),
+  },
+});
+
+// Add metadata to specific responses
+const withMeta = response.withMeta({
+  userId: "user-123",
+});
+
+const res = withMeta.json({ message: "Hello" });
+// Response includes requestId, userId, and timestamp in metadata
+```
+
+## Response Mapping
+
+Customize the final response structure:
+
+```typescript
+const response = createResponseHandler({
+  mapResponse: ({ data, error, response }) => {
+    // Custom response structure
+    if (error) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          error: error,
+        }),
+        {
+          status: response.status,
+          headers: response.headers,
+        }
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        data: data,
+      }),
+      {
+        status: 200,
+        headers: response.headers,
+      }
+    );
+  },
+});
+```
+
+## Default Response Format
+
+By default, responses use this structure:
+
+```typescript
+interface DefaultResponse<TData = unknown> {
+  success: boolean;
+  error: ErrorResponse | null;
+  data: TData | null;
+  metadata: Record<string, unknown>;
+}
+```
+
+**Success response:**
+```json
+{
+  "success": true,
+  "error": null,
+  "data": { "message": "Hello" },
+  "metadata": { "requestId": "...", "timestamp": "..." }
+}
+```
+
+**Error response:**
+```json
+{
+  "success": false,
+  "error": {
+    "message": "User not found",
+    "code": "NOT_FOUND"
+  },
+  "data": null,
+  "metadata": { "requestId": "...", "timestamp": "..." }
+}
+```
+
+## Advanced Examples
+
+### Comprehensive Response Handler
+
+```typescript
+import { createResponseHandler, options } from "@apisr/response";
+import { z } from "zod";
+
+const response = createResponseHandler(
+  options()
+    .json({
+      mapData: (data) => ({
+        result: data,
+        serverTime: new Date().toISOString(),
+      }),
+      headers: () => ({
+        "X-API-Version": "2.0",
+      }),
+    })
+    .error({
+      mapDefaultError: (type) => {
+        const errors = {
+          internal: { message: "Server error", code: "SERVER_ERROR" },
+          badRequest: { message: "Bad request", code: "BAD_REQUEST" },
+          notFound: { message: "Not found", code: "NOT_FOUND" },
+        };
+        return errors[type] || errors.internal;
+      },
+    })
+    .meta({
+      schema: z.object({
+        requestId: z.string(),
+        environment: z.enum(["dev", "prod"]),
+      }),
+      default: () => ({
+        requestId: crypto.randomUUID(),
+        environment: process.env.NODE_ENV === "production" ? "prod" : "dev",
+      }),
+    })
+    .binary({
+      headers: (binary) => {
+        const size = binary instanceof Blob ? binary.size : 0;
+        return {
+          "Content-Length": String(size),
+          "Cache-Control": "public, max-age=3600",
+        };
+      },
+    })
+    .build()
+)
+  .defineError(
+    "validation",
+    ({ input }) => ({
+      message: "Validation failed",
+      fields: input.fields,
+      code: "VALIDATION_ERROR",
+    }),
+    {
+      status: 400,
+      input: z.object({
+        fields: z.record(z.string()),
+      }),
+    }
+  )
+  .defineError(
+    "unauthorized",
+    () => ({
+      message: "Authentication required",
+      code: "UNAUTHORIZED",
+    }),
+    { status: 401 }
+  );
+```
+
+## API Reference
+
+### createResponseHandler
+
+<ParamField path="options" type="Options">
+  Response handler configuration object
+</ParamField>
+
+### ResponseHandler Methods
+
+<ParamField path="json" type="(data, options?) => JsonResponse">
+  Create a JSON response
+</ParamField>
+
+<ParamField path="text" type="(text, options?) => TextResponse">
+  Create a plain text response
+</ParamField>
+
+<ParamField path="binary" type="(binary, options?) => BinaryResponse">
+  Create a binary response (Blob, ArrayBuffer, etc.)
+</ParamField>
+
+<ParamField path="fail" type="(name, input?) => ErrorResponse">
+  Create an error response
+</ParamField>
+
+<ParamField path="withMeta" type="(meta) => ResponseHandler">
+  Create new handler with preassigned metadata
+</ParamField>
+
+<ParamField path="defineError" type="(name, handler, options?) => ResponseHandler">
+  Define a custom error handler
+</ParamField>
+
+### Options Builder Methods
+
+<ParamField path="json" type="(config) => Builder">
+  Configure JSON response options
+</ParamField>
+
+<ParamField path="error" type="(config) => Builder">
+  Configure error handling options
+</ParamField>
+
+<ParamField path="meta" type="(config) => Builder">
+  Configure metadata options
+</ParamField>
+
+<ParamField path="binary" type="(config) => Builder">
+  Configure binary response options
+</ParamField>
+
+<ParamField path="build" type="() => Options">
+  Build the final options object
+</ParamField>
+
+## Type Safety
+
+`@apisr/response` provides full TypeScript support:
+
+- Error types are inferred from `defineError` calls
+- Payload schemas enforce valid error inputs
+- Response types adapt based on configuration
+- Meta schemas validate metadata structure
+
+```typescript
+const response = createResponseHandler({}).defineError(
+  "notFound",
+  ({ input }) => ({
+    message: input.resource, // ✅ Type-safe
+  }),
+  {
+    input: z.object({ resource: z.string() }),
+  }
+);
+
+// ✅ Type-safe
+throw response.fail("notFound", { resource: "User" });
+
+// ❌ Type error
+throw response.fail("notFound", { invalid: "field" });
+```

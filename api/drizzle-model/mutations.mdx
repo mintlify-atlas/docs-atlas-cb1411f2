@@ -1,0 +1,489 @@
+---
+title: "Mutation Methods"
+description: "Insert, update, delete, and upsert data with type-safe mutation methods."
+---
+
+## Overview
+
+Mutation methods modify data in your database. All mutations can optionally return affected rows using `.return()` or `.returnFirst()`.
+
+## insert
+
+Insert one or more rows into the table.
+
+### Syntax
+
+```ts
+model.insert(data) => ModelInMutableResult
+```
+
+### Parameters
+
+<ParamField path="data" type="TableInsert | TableInsert[]" required>
+  Object (or array of objects) containing the data to insert.
+  
+  Must match the table schema. Optional columns can be omitted.
+</ParamField>
+
+### Return Type
+
+Returns a `ModelInMutableResult` which extends `Promise<void>` with optional return methods:
+
+- `.return()` - Return all inserted rows
+- `.returnFirst()` - Return first inserted row
+
+### Examples
+
+<Tabs>
+  <Tab title="Insert Single">
+    ```ts
+    await userModel.insert({
+      name: "Alex",
+      email: "alex@example.com",
+      age: 25,
+    });
+    ```
+  </Tab>
+  
+  <Tab title="Insert with Return">
+    ```ts
+    const user = await userModel
+      .insert({
+        name: "Alex",
+        email: "alex@example.com",
+        age: 25,
+      })
+      .returnFirst();
+    
+    console.log(user.id); // Auto-generated ID
+    ```
+  </Tab>
+  
+  <Tab title="Insert Multiple">
+    ```ts
+    const users = await userModel
+      .insert([
+        { name: "Alex", email: "alex@example.com", age: 25 },
+        { name: "Anna", email: "anna@example.com", age: 30 },
+      ])
+      .return();
+    
+    console.log(users.length); // 2
+    ```
+  </Tab>
+  
+  <Tab title="Partial Return">
+    ```ts
+    const user = await userModel
+      .insert({
+        name: "Alex",
+        email: "alex@example.com",
+        age: 25,
+      })
+      .returnFirst({ id: true, name: true });
+    // Only id and name are returned
+    ```
+  </Tab>
+</Tabs>
+
+## update
+
+Update rows matching the current where conditions.
+
+### Syntax
+
+```ts
+model.update(data) => ModelInMutableResult
+```
+
+### Parameters
+
+<ParamField path="data" type="Partial<TableInsert>" required>
+  Object containing fields to update.
+  
+  All fields are optional - only provided fields will be updated.
+</ParamField>
+
+### Return Type
+
+Returns a `ModelInMutableResult` with optional return methods.
+
+### Examples
+
+<Tabs>
+  <Tab title="Update Single">
+    ```ts
+    await userModel
+      .where({ id: esc(1) })
+      .update({ name: "Updated Name" });
+    ```
+  </Tab>
+  
+  <Tab title="Update with Return">
+    ```ts
+    const updated = await userModel
+      .where({ id: esc(1) })
+      .update({ name: "New Name", age: 26 })
+      .returnFirst();
+    
+    console.log(updated.name); // "New Name"
+    ```
+  </Tab>
+  
+  <Tab title="Update Multiple">
+    ```ts
+    const updated = await userModel
+      .where({ isVerified: esc(false) })
+      .update({ isVerified: true })
+      .return();
+    
+    console.log(`Updated ${updated.length} users`);
+    ```
+  </Tab>
+  
+  <Tab title="Omit Sensitive Fields">
+    ```ts
+    const user = await userModel
+      .where({ id: esc(1) })
+      .update({ secretField: "new-secret" })
+      .returnFirst()
+      .omit({ secretField: true });
+    // secretField is excluded from the result
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  Always use `.where()` before `.update()` to specify which rows to update. Without a where clause, ALL rows will be updated.
+</Warning>
+
+## delete
+
+Delete rows matching the current where conditions.
+
+### Syntax
+
+```ts
+model.delete() => ModelInMutableResult
+```
+
+### Return Type
+
+Returns a `ModelInMutableResult` with optional return methods.
+
+### Examples
+
+<Tabs>
+  <Tab title="Delete Single">
+    ```ts
+    await userModel
+      .where({ id: esc(1) })
+      .delete();
+    ```
+  </Tab>
+  
+  <Tab title="Delete with Return">
+    ```ts
+    const deleted = await userModel
+      .where({ id: esc(1) })
+      .delete()
+      .returnFirst();
+    
+    if (deleted) {
+      console.log(`Deleted user: ${deleted.name}`);
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Delete Multiple">
+    ```ts
+    const deleted = await userModel
+      .where({ isVerified: esc(false) })
+      .delete()
+      .return();
+    
+    console.log(`Deleted ${deleted.length} unverified users`);
+    ```
+  </Tab>
+  
+  <Tab title="Conditional Delete">
+    ```ts
+    const count = await userModel
+      .where({ 
+        lastLoginAt: { isNull: true },
+        createdAt: esc.lt(new Date('2020-01-01'))
+      })
+      .delete()
+      .return();
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  Always use `.where()` before `.delete()` to specify which rows to delete. Without a where clause, ALL rows will be deleted.
+</Warning>
+
+## upsert
+
+Insert a row or update it if a conflict occurs on the target column(s).
+
+### Syntax
+
+```ts
+model.upsert({
+  insert,
+  update,
+  target?,
+  updateWhere?
+}) => ModelInMutableResult
+```
+
+### Parameters
+
+<ParamField path="insert" type="TableInsert" required>
+  Data to insert if no conflict occurs.
+</ParamField>
+
+<ParamField path="update" type="Partial<TableInsert> | UpdateFunction" required>
+  Data to update if a conflict occurs.
+  
+  Can be a plain object or a function receiving a context object with:
+  - `excluded(field)` - Value from the INSERT attempt
+  - `inserted(field)` - Existing value in the table
+</ParamField>
+
+<ParamField path="target" type="Column | Column[]">
+  Column(s) to check for conflicts. Defaults to primary key(s).
+  
+  ```ts
+  import * as schema from "./schema";
+  
+  target: schema.user.email
+  // or
+  target: [schema.user.email, schema.user.username]
+  ```
+</ParamField>
+
+<ParamField path="updateWhere" type="UpdateWhereFunction">
+  Function to add additional WHERE conditions to the UPDATE clause.
+  
+  ```ts
+  updateWhere: (c) => ({
+    updatedAt: esc.lt(c.excluded("updatedAt"))
+  })
+  ```
+</ParamField>
+
+### Return Type
+
+Returns a `ModelInMutableResult` with optional return methods.
+
+### Examples
+
+<Tabs>
+  <Tab title="Basic Upsert">
+    ```ts
+    import * as schema from "./schema";
+    
+    await userModel.upsert({
+      insert: { 
+        name: "Alex", 
+        email: "alex@example.com", 
+        age: 25 
+      },
+      update: { 
+        name: "Alex Updated",
+        age: 26
+      },
+      target: schema.user.email,
+    });
+    ```
+  </Tab>
+  
+  <Tab title="With Return">
+    ```ts
+    import * as schema from "./schema";
+    
+    const user = await userModel
+      .upsert({
+        insert: { 
+          name: "Alex", 
+          email: "alex@example.com", 
+          age: 25 
+        },
+        update: { name: "Alex Updated" },
+        target: schema.user.email,
+      })
+      .returnFirst();
+    
+    console.log(user.id);
+    ```
+  </Tab>
+  
+  <Tab title="Dynamic Update">
+    ```ts
+    import * as schema from "./schema";
+    
+    await userModel.upsert({
+      insert: { 
+        name: "Alex", 
+        email: "alex@example.com", 
+        loginCount: 1 
+      },
+      update: (c) => ({
+        // Increment login count using SQL
+        loginCount: sql`${c.inserted("loginCount")} + 1`,
+        lastLoginAt: c.excluded("lastLoginAt"),
+      }),
+      target: schema.user.email,
+    });
+    ```
+  </Tab>
+  
+  <Tab title="Conditional Update">
+    ```ts
+    import * as schema from "./schema";
+    
+    await userModel.upsert({
+      insert: { 
+        name: "Alex", 
+        email: "alex@example.com",
+        updatedAt: new Date(),
+      },
+      update: { name: "Alex Updated" },
+      target: schema.user.email,
+      // Only update if new data is newer
+      updateWhere: (c) => ({
+        updatedAt: esc.lt(c.excluded("updatedAt"))
+      }),
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Return Methods
+
+All mutation methods return a `ModelInMutableResult` which provides these chainable methods:
+
+### .return()
+
+Return all affected rows.
+
+```ts
+const users = await userModel
+  .insert([...])
+  .return();
+// users: User[]
+```
+
+Optionally specify which fields to return:
+
+```ts
+const users = await userModel
+  .insert([...])
+  .return({ id: true, name: true });
+// Only id and name are returned
+```
+
+### .returnFirst()
+
+Return the first affected row (or `undefined` if no rows affected).
+
+```ts
+const user = await userModel
+  .insert({ ... })
+  .returnFirst();
+// user: User | undefined
+```
+
+Optionally specify which fields to return:
+
+```ts
+const user = await userModel
+  .insert({ ... })
+  .returnFirst({ id: true, name: true });
+```
+
+### .omit()
+
+Exclude specific fields from the returned result (post-query, not SQL).
+
+```ts
+const user = await userModel
+  .update({ secretField: "value" })
+  .returnFirst()
+  .omit({ secretField: true, password: true });
+// secretField and password are excluded from result
+```
+
+### .safe()
+
+Wrap the result in a `{ data, error }` object instead of throwing errors.
+
+```ts
+const result = await userModel
+  .insert({ ... })
+  .returnFirst()
+  .safe();
+
+if (result.error) {
+  console.error(result.error);
+} else {
+  console.log(result.data);
+}
+```
+
+## Dialect Differences
+
+### PostgreSQL & SQLite
+
+Natively support `.returning()` - all fields are returned efficiently:
+
+```ts
+const user = await userModel.insert({ ... }).returnFirst();
+// Uses RETURNING clause
+```
+
+### MySQL
+
+Does not support RETURNING. Only returns primary key fields:
+
+```ts
+const result = await userModel.insert({ ... }).returnFirst();
+// result: { id: number } - only primary key
+```
+
+For full row data, perform a follow-up query:
+
+```ts
+const { id } = await userModel.insert({ ... }).returnFirst();
+const user = await userModel.where({ id: esc(id) }).findFirst();
+```
+
+## Type Safety
+
+All mutation methods are fully typed:
+
+```ts
+// ✅ TypeScript validates insert data
+await userModel.insert({
+  name: "Alex",    // ✅ Valid
+  age: 25,         // ✅ Valid
+  // invalid: 123  // ❌ Type error: unknown field
+});
+
+// ✅ Update data is partial
+await userModel.update({
+  name: "New Name", // ✅ Can update just one field
+});
+```
+
+## Notes
+
+<Note>
+  Mutation methods that modify the database always return `Promise<void>` unless you chain `.return()` or `.returnFirst()`.
+</Note>
+
+<Warning>
+  **MySQL Limitation**: `.return()` methods only return primary key values on MySQL. Use `.findFirst()` for full row data.
+</Warning>

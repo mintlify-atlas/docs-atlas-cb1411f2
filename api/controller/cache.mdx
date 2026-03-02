@@ -1,0 +1,401 @@
+---
+title: Cache
+description: Caching system for handlers with support for custom stores and key resolvers
+---
+
+## Overview
+
+The cache system provides a flexible way to cache handler responses and intermediate computations with support for custom cache stores and key resolution strategies.
+
+## createCache
+
+Creates a cache function for use within handlers.
+
+```typescript
+import { createCache } from '@apisr/controller';
+
+const cache = createCache({
+  payload: { userId: '123' },
+  handlerCache: {
+    store: myStore,
+    key: ['user', 'profile'],
+  },
+  callCache: {
+    wrapHandler: true,
+  },
+});
+
+const result = await cache(['expensive', 'operation'], async () => {
+  return await performExpensiveOperation();
+});
+```
+
+<ParamField path="opts" type="CreateCacheOptions" required>
+  Options for creating the cache function
+  
+  <ParamField path="payload" type="TPayload" required>
+    The handler payload used for cache key resolution
+  </ParamField>
+  
+  <ParamField path="handlerCache" type="CacheOptions">
+    Default cache options from handler configuration
+  </ParamField>
+  
+  <ParamField path="callCache" type="CacheOptions">
+    Override cache options from handler call
+  </ParamField>
+</ParamField>
+
+<ResponseField name="cache" type="CacheFn">
+  A cache function for memoizing operations
+</ResponseField>
+
+## CacheFn
+
+The cache function signature returned by `createCache`.
+
+```typescript
+type CacheFn = <TValue = unknown>(
+  key: CacheKey,
+  callback: CacheCallback<TValue>,
+  options?: CacheCallbackOptions
+) => Promise<TValue>;
+```
+
+<ParamField path="key" type="CacheKey" required>
+  Cache key as a string or array of strings
+  
+  ```typescript
+  // String key
+  await cache('user-profile', async () => {...});
+  
+  // Array key (joined with ':')
+  await cache(['user', userId, 'profile'], async () => {...});
+  ```
+</ParamField>
+
+<ParamField path="callback" type="CacheCallback<TValue>" required>
+  Function to execute if cache miss occurs
+  
+  ```typescript
+  type CacheCallback<TValue> = () => Promise<TValue> | TValue;
+  ```
+</ParamField>
+
+<ParamField path="options" type="CacheCallbackOptions">
+  Additional options for this cache operation
+  
+  <ParamField path="ttl" type="number">
+    Time-to-live in milliseconds
+  </ParamField>
+  
+  Additional properties are passed through to the store implementation
+</ParamField>
+
+<ResponseField name="value" type="TValue">
+  The cached or computed value
+</ResponseField>
+
+## CacheOptions
+
+Configuration options for cache behavior.
+
+```typescript
+interface CacheOptions<TPayload, TStore extends CacheStore> {
+  key?: CacheKeyInput<TPayload>;
+  store: TStore;
+  wrapHandler?: boolean;
+}
+```
+
+<ParamField path="key" type="CacheKeyInput">
+  Base cache key or resolver function
+  
+  ```typescript
+  // Static key
+  key: ['api', 'users']
+  
+  // Dynamic key resolver
+  key: ({ payload }) => ['user', payload.userId]
+  ```
+</ParamField>
+
+<ParamField path="store" type="CacheStore" required>
+  Cache store implementation
+</ParamField>
+
+<ParamField path="wrapHandler" type="boolean" default={false}>
+  If `true`, caches the entire handler response instead of individual operations
+</ParamField>
+
+## CacheStore
+
+Interface for implementing custom cache stores.
+
+```typescript
+interface CacheStore {
+  get<TValue = unknown>(key: string): Promise<TValue | undefined> | TValue | undefined;
+  set<TValue = unknown>(
+    key: string,
+    value: TValue,
+    options?: CacheCallbackOptions
+  ): Promise<void> | void;
+  delete?(key: string): Promise<boolean | void> | boolean | void;
+}
+```
+
+<ParamField path="get" type="(key: string) => Promise<TValue | undefined>" required>
+  Retrieve a value from the cache
+  
+  <ParamField path="key" type="string" required>
+    The cache key
+  </ParamField>
+  
+  <ResponseField name="value" type="TValue | undefined">
+    The cached value, or `undefined` if not found
+  </ResponseField>
+</ParamField>
+
+<ParamField path="set" type="(key: string, value: TValue, options?) => Promise<void>" required>
+  Store a value in the cache
+  
+  <ParamField path="key" type="string" required>
+    The cache key
+  </ParamField>
+  
+  <ParamField path="value" type="TValue" required>
+    The value to cache
+  </ParamField>
+  
+  <ParamField path="options" type="CacheCallbackOptions">
+    Additional options (e.g., TTL)
+  </ParamField>
+</ParamField>
+
+<ParamField path="delete" type="(key: string) => Promise<boolean | void>">
+  Optional method to delete a cached value
+  
+  <ParamField path="key" type="string" required>
+    The cache key
+  </ParamField>
+  
+  <ResponseField name="deleted" type="boolean | void">
+    Whether the key was deleted
+  </ResponseField>
+</ParamField>
+
+## CacheKeyResolver
+
+Function type for dynamically resolving cache keys.
+
+```typescript
+type CacheKeyResolver<TPayload = unknown> = (
+  data: CacheKeyResolverData<TPayload>
+) => CacheKey;
+```
+
+<ParamField path="data" type="CacheKeyResolverData" required>
+  <ParamField path="payload" type="TPayload" required>
+    The handler payload
+  </ParamField>
+</ParamField>
+
+<ResponseField name="key" type="CacheKey">
+  The resolved cache key (string or string array)
+</ResponseField>
+
+## Utility Functions
+
+### resolveCacheOptions
+
+Merges handler and call cache options.
+
+```typescript
+import { resolveCacheOptions } from '@apisr/controller';
+
+const resolved = resolveCacheOptions({
+  handlerCache: { store: myStore, key: ['base'] },
+  callCache: { wrapHandler: true },
+});
+```
+
+<ParamField path="input" type="object" required>
+  <ParamField path="handlerCache" type="CacheOptions">
+    Handler-level cache options
+  </ParamField>
+  
+  <ParamField path="callCache" type="CacheOptions">
+    Call-level cache options (overrides handler options)
+  </ParamField>
+</ParamField>
+
+<ResponseField name="options" type="CacheOptions | undefined">
+  Merged cache options, or `undefined` if no store is configured
+</ResponseField>
+
+### resolveCacheKey
+
+Resolves a cache key from inputs.
+
+```typescript
+import { resolveCacheKey } from '@apisr/controller';
+
+const key = resolveCacheKey({
+  key: ['user', 'profile'],
+  payload: { userId: '123' },
+  baseKey: ['api'],
+});
+// Result: 'api:user:profile'
+```
+
+<ParamField path="input" type="object" required>
+  <ParamField path="key" type="CacheKey" required>
+    The cache key
+  </ParamField>
+  
+  <ParamField path="payload" type="TPayload" required>
+    The handler payload
+  </ParamField>
+  
+  <ParamField path="baseKey" type="CacheKeyInput">
+    Base key to prepend
+  </ParamField>
+  
+  <ParamField path="wrapHandler" type="boolean">
+    Whether wrapping the entire handler
+  </ParamField>
+</ParamField>
+
+<ResponseField name="key" type="string">
+  The resolved cache key string (parts joined with `:`)
+</ResponseField>
+
+## Usage Examples
+
+### Handler-Level Caching
+
+```typescript
+import { createHandler } from '@apisr/controller';
+import Keyv from 'keyv';
+
+const store = new Keyv();
+
+const handler = createHandler({
+  cache: {
+    store,
+    wrapHandler: true,
+    key: ({ payload }) => ['user', payload.userId],
+  },
+});
+
+const getUser = handler(
+  async ({ payload }) => {
+    // This entire handler will be cached
+    return await db.users.findById(payload.userId);
+  },
+  {
+    payload: { userId: s.params('id') },
+  }
+);
+```
+
+### Operation-Level Caching
+
+```typescript
+const getUser = handler(
+  async ({ payload, cache }) => {
+    const profile = await cache(
+      ['profile', payload.userId],
+      async () => {
+        return await db.profiles.findByUserId(payload.userId);
+      },
+      { ttl: 60000 } // 1 minute TTL
+    );
+    
+    const posts = await cache(
+      ['posts', payload.userId],
+      async () => {
+        return await db.posts.findByUserId(payload.userId);
+      },
+      { ttl: 30000 } // 30 seconds TTL
+    );
+    
+    return { profile, posts };
+  },
+  {
+    payload: { userId: s.params('id') },
+    cache: {
+      store,
+      key: ['user-data'],
+    },
+  }
+);
+```
+
+### Custom Cache Store
+
+```typescript
+import { type CacheStore } from '@apisr/controller';
+
+class RedisStore implements CacheStore {
+  constructor(private redis: Redis) {}
+  
+  async get<TValue>(key: string): Promise<TValue | undefined> {
+    const value = await this.redis.get(key);
+    return value ? JSON.parse(value) : undefined;
+  }
+  
+  async set<TValue>(
+    key: string,
+    value: TValue,
+    options?: { ttl?: number }
+  ): Promise<void> {
+    const serialized = JSON.stringify(value);
+    if (options?.ttl) {
+      await this.redis.setex(key, Math.floor(options.ttl / 1000), serialized);
+    } else {
+      await this.redis.set(key, serialized);
+    }
+  }
+  
+  async delete(key: string): Promise<boolean> {
+    const result = await this.redis.del(key);
+    return result > 0;
+  }
+}
+
+const redisStore = new RedisStore(redis);
+
+const handler = createHandler({
+  cache: {
+    store: redisStore,
+  },
+});
+```
+
+### Dynamic Cache Keys
+
+```typescript
+const getOrganizationData = handler(
+  async ({ payload, cache }) => {
+    const data = await cache(
+      ['org', payload.orgId, 'data', payload.dataType],
+      async () => {
+        return await fetchOrganizationData(payload.orgId, payload.dataType);
+      }
+    );
+    
+    return data;
+  },
+  {
+    payload: {
+      orgId: s.params('orgId'),
+      dataType: s.query('type'),
+    },
+    cache: {
+      store,
+      key: ({ payload }) => ['org', payload.orgId],
+    },
+  }
+);
+```

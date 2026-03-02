@@ -1,0 +1,324 @@
+---
+title: Installation
+description: Install Apiser packages for your TypeScript backend and frontend applications
+---
+
+Apiser is a collection of packages that work together or independently. Install only the packages you need for your project.
+
+## Prerequisites
+
+<Note>
+Apiser requires Node.js 18 or later. Bun 1.0+ is also supported.
+</Note>
+
+## Core packages
+
+### @apisr/drizzle-model
+
+Type-safe, chainable model runtime for Drizzle ORM.
+
+<Warning>
+This package requires Drizzle ORM beta version (`^1.0.0-beta.2-86f844e`). Standard Drizzle v0.x is not supported. The package also requires Drizzle relations v2.
+</Warning>
+
+<CodeGroup>
+```bash npm
+npm install @apisr/drizzle-model drizzle-orm@beta
+```
+
+```bash yarn
+yarn add @apisr/drizzle-model drizzle-orm@beta
+```
+
+```bash pnpm
+pnpm add @apisr/drizzle-model drizzle-orm@beta
+```
+
+```bash bun
+bun add @apisr/drizzle-model drizzle-orm@beta
+```
+</CodeGroup>
+
+**Peer dependencies:**
+- `drizzle-orm@^1.0.0-beta.2-86f844e` (required)
+- `pg@^8.16.3` (for PostgreSQL)
+
+### @apisr/controller
+
+Composable request handlers with validation, caching, and error handling.
+
+<CodeGroup>
+```bash npm
+npm install @apisr/controller
+```
+
+```bash yarn
+yarn add @apisr/controller
+```
+
+```bash pnpm
+pnpm add @apisr/controller
+```
+
+```bash bun
+bun add @apisr/controller
+```
+</CodeGroup>
+
+**Peer dependencies:**
+- `keyv@^5.6.0` (for caching)
+- `elysia@^1.4.25` (for Elysia integration)
+
+**Subpath exports:**
+- `@apisr/controller` - Core controller functionality
+- `@apisr/controller/elysia` - Elysia.js integration
+- `@apisr/controller/cache/keyv` - Keyv cache adapter
+
+### @apisr/response
+
+Standardized response utilities for consistent API responses.
+
+<CodeGroup>
+```bash npm
+npm install @apisr/response
+```
+
+```bash yarn
+yarn add @apisr/response
+```
+
+```bash pnpm
+pnpm add @apisr/response
+```
+
+```bash bun
+bun add @apisr/response
+```
+</CodeGroup>
+
+### @apisr/schema
+
+Universal schema validation with Zod support.
+
+<CodeGroup>
+```bash npm
+npm install @apisr/schema
+```
+
+```bash yarn
+yarn add @apisr/schema
+```
+
+```bash pnpm
+pnpm add @apisr/schema
+```
+
+```bash bun
+bun add @apisr/schema
+```
+</CodeGroup>
+
+### @apisr/zod
+
+Enhanced Zod utilities for schema validation.
+
+<CodeGroup>
+```bash npm
+npm install @apisr/zod zod
+```
+
+```bash yarn
+yarn add @apisr/zod zod
+```
+
+```bash pnpm
+pnpm add @apisr/zod zod
+```
+
+```bash bun
+bun add @apisr/zod zod
+```
+</CodeGroup>
+
+**Dependencies:**
+- `zod@^4.3.5`
+
+### @apisr/logger
+
+Colorful console logging with JSON formatting and stack traces.
+
+<CodeGroup>
+```bash npm
+npm install @apisr/logger
+```
+
+```bash yarn
+yarn add @apisr/logger
+```
+
+```bash pnpm
+pnpm add @apisr/logger
+```
+
+```bash bun
+bun add @apisr/logger
+```
+</CodeGroup>
+
+**Subpath exports:**
+- `@apisr/logger` - Core logger functionality
+- `@apisr/logger/console` - Console logger implementation
+
+## Full stack installation
+
+For a complete backend setup with all core packages:
+
+<CodeGroup>
+```bash npm
+npm install @apisr/drizzle-model @apisr/controller @apisr/response @apisr/schema @apisr/zod @apisr/logger drizzle-orm@beta zod
+```
+
+```bash yarn
+yarn add @apisr/drizzle-model @apisr/controller @apisr/response @apisr/schema @apisr/zod @apisr/logger drizzle-orm@beta zod
+```
+
+```bash pnpm
+pnpm add @apisr/drizzle-model @apisr/controller @apisr/response @apisr/schema @apisr/zod @apisr/logger drizzle-orm@beta zod
+```
+
+```bash bun
+bun add @apisr/drizzle-model @apisr/controller @apisr/response @apisr/schema @apisr/zod @apisr/logger drizzle-orm@beta zod
+```
+</CodeGroup>
+
+## TypeScript configuration
+
+Apiser packages are designed for TypeScript and require proper configuration.
+
+<Tip>
+Enable `strict` mode in your `tsconfig.json` for the best type safety experience.
+</Tip>
+
+```json tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true
+  }
+}
+```
+
+## Database setup (for @apisr/drizzle-model)
+
+If you're using `@apisr/drizzle-model`, you'll also need to install a database driver:
+
+### PostgreSQL
+
+<CodeGroup>
+```bash npm
+npm install pg drizzle-orm@beta
+npm install -D @types/pg drizzle-kit@beta
+```
+
+```bash yarn
+yarn add pg drizzle-orm@beta
+yarn add -D @types/pg drizzle-kit@beta
+```
+
+```bash pnpm
+pnpm add pg drizzle-orm@beta
+pnpm add -D @types/pg drizzle-kit@beta
+```
+
+```bash bun
+bun add pg drizzle-orm@beta
+bun add -D @types/pg drizzle-kit@beta
+```
+</CodeGroup>
+
+### MySQL
+
+<CodeGroup>
+```bash npm
+npm install mysql2 drizzle-orm@beta
+npm install -D drizzle-kit@beta
+```
+
+```bash yarn
+yarn add mysql2 drizzle-orm@beta
+yarn add -D drizzle-kit@beta
+```
+
+```bash pnpm
+pnpm add mysql2 drizzle-orm@beta
+pnpm add -D drizzle-kit@beta
+```
+
+```bash bun
+bun add mysql2 drizzle-orm@beta
+bun add -D drizzle-kit@beta
+```
+</CodeGroup>
+
+### SQLite
+
+<CodeGroup>
+```bash npm
+npm install better-sqlite3 drizzle-orm@beta
+npm install -D @types/better-sqlite3 drizzle-kit@beta
+```
+
+```bash yarn
+yarn add better-sqlite3 drizzle-orm@beta
+yarn add -D @types/better-sqlite3 drizzle-kit@beta
+```
+
+```bash pnpm
+pnpm add better-sqlite3 drizzle-orm@beta
+pnpm add -D @types/better-sqlite3 drizzle-kit@beta
+```
+
+```bash bun
+bun add better-sqlite3 drizzle-orm@beta
+bun add -D @types/better-sqlite3 drizzle-kit@beta
+```
+</CodeGroup>
+
+## Verify installation
+
+Create a test file to verify your installation:
+
+```ts test.ts
+import { modelBuilder, esc } from "@apisr/drizzle-model";
+
+console.log("Apiser packages installed successfully!");
+```
+
+Run the file:
+
+<CodeGroup>
+```bash node
+npx tsx test.ts
+```
+
+```bash bun
+bun test.ts
+```
+</CodeGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Build your first application with Apiser
+  </Card>
+  <Card title="Drizzle Model" icon="database" href="/packages/drizzle-model">
+    Learn about the Drizzle ORM model runtime
+  </Card>
+</CardGroup>

@@ -1,0 +1,374 @@
+---
+title: '@apisr/zod'
+description: 'Extended Zod with request source mapping for API validation'
+---
+
+## Overview
+
+The `@apisr/zod` package extends [Zod](https://zod.dev) with additional utilities for API development. It adds the `.from()` method to Zod schemas, enabling you to specify where field values should be extracted from (query params, body, headers, etc.) in HTTP requests.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @apisr/zod
+```
+
+```bash yarn
+yarn add @apisr/zod
+```
+
+```bash pnpm
+pnpm add @apisr/zod
+```
+
+```bash bun
+bun add @apisr/zod
+```
+</CodeGroup>
+
+<Note>
+This package includes `zod` as a dependency, so you don't need to install it separately.
+</Note>
+
+## Exports
+
+The package exports:
+
+- `zod` / `z` - Extended Zod instance with `.from()` method
+- `_z` - Original Zod instance (without extensions)
+- `extendZod()` - Function to extend a Zod instance
+- `resolveZodSchemaMeta()` - Extract metadata from schemas
+- `resolveZodSchemaFromSources()` - Resolve field values from multiple sources
+- Types: `FieldMeta`, `SchemaFieldsMeta`, `FromKey`, `FromOptions`
+
+## Quick Start
+
+Import the extended Zod instance:
+
+```typescript
+import { z } from '@apisr/zod';
+
+// Use like regular Zod, but with .from() support
+const schema = z.object({
+  name: z.string().from('body'),
+  id: z.string().from('params'),
+  search: z.string().from('query'),
+});
+```
+
+## The `.from()` Method
+
+The `.from()` method annotates schema fields with metadata about their source location in an HTTP request:
+
+```typescript
+import { z } from '@apisr/zod';
+
+const userSchema = z.object({
+  // From request body
+  name: z.string().from('body'),
+  email: z.string().email().from('body'),
+  
+  // From URL params
+  id: z.string().from('params'),
+  
+  // From query string
+  search: z.string().optional().from('query'),
+  
+  // From headers
+  token: z.string().from('headers', { key: 'authorization' }),
+});
+```
+
+### Supported Source Types
+
+<ParamField path="from" type="FromKey" required>
+  The source location for the field value:
+  - `"query"` - URL query parameters
+  - `"params"` - URL path parameters
+  - `"body"` - Request body
+  - `"headers"` - HTTP headers
+</ParamField>
+
+<ParamField path="options" type="FromOptions">
+  Optional configuration:
+  - `key` - Custom key name(s) to look up in the source
+</ParamField>
+
+## Extracting Metadata
+
+Use `resolveZodSchemaMeta()` to extract source metadata from a schema:
+
+```typescript
+import { z, resolveZodSchemaMeta } from '@apisr/zod';
+
+const schema = z.object({
+  name: z.string().from('body'),
+  id: z.string().from('params'),
+  token: z.string().from('headers', { key: 'authorization' }),
+});
+
+const meta = resolveZodSchemaMeta(schema);
+
+console.log(meta);
+// {
+//   name:  { from: "body" },
+//   id:    { from: "params" },
+//   token: { from: "headers", key: "authorization" },
+// }
+```
+
+## Resolving Values from Sources
+
+Use `resolveZodSchemaFromSources()` to automatically extract and map values from different request sources:
+
+```typescript
+import { z, resolveZodSchemaFromSources } from '@apisr/zod';
+
+const schema = z.object({
+  name: z.string().from('body'),
+  id: z.string().from('params'),
+  search: z.string().from('query'),
+  auth: z.string().from('headers', { key: 'authorization' }),
+});
+
+const resolved = resolveZodSchemaFromSources(schema, {
+  body: { name: 'John Doe' },
+  params: { id: '123' },
+  query: { search: 'test' },
+  headers: { authorization: 'Bearer token123' },
+});
+
+console.log(resolved);
+// {
+//   name: "John Doe",
+//   id: "123",
+//   search: "test",
+//   auth: "Bearer token123"
+// }
+```
+
+### Custom Key Mapping
+
+Map fields to different keys in the source:
+
+```typescript
+import { z, resolveZodSchemaFromSources } from '@apisr/zod';
+
+const schema = z.object({
+  // Map 'token' field to 'authorization' header
+  token: z.string().from('headers', { key: 'authorization' }),
+  
+  // Map 'userId' field to 'id' param
+  userId: z.string().from('params', { key: 'id' }),
+});
+
+const resolved = resolveZodSchemaFromSources(schema, {
+  headers: { authorization: 'Bearer xyz' },
+  params: { id: '456' },
+});
+
+console.log(resolved);
+// { token: "Bearer xyz", userId: "456" }
+```
+
+### Multiple Key Fallbacks
+
+Provide multiple keys to check in order:
+
+```typescript
+const schema = z.object({
+  // Try 'authorization' first, then 'x-auth-token'
+  token: z.string().from('headers', {
+    key: ['authorization', 'x-auth-token'],
+  }),
+});
+
+const resolved = resolveZodSchemaFromSources(schema, {
+  headers: { 'x-auth-token': 'token123' },
+});
+
+console.log(resolved);
+// { token: "token123" }
+```
+
+### Nested Key Paths
+
+Access nested object properties using dot notation:
+
+```typescript
+const schema = z.object({
+  userName: z.string().from('body', { key: 'user.name' }),
+  userEmail: z.string().from('body', { key: 'user.email' }),
+});
+
+const resolved = resolveZodSchemaFromSources(schema, {
+  body: {
+    user: {
+      name: 'John',
+      email: 'john@example.com',
+    },
+  },
+});
+
+console.log(resolved);
+// { userName: "John", userEmail: "john@example.com" }
+```
+
+## Advanced Usage
+
+### Custom Source Types
+
+You can use custom source identifiers beyond the standard request parts:
+
+```typescript
+const schema = z.object({
+  prevName: z.string().from('handler.payload', { key: 'name' }),
+  contextId: z.string().from('context.user', { key: 'id' }),
+});
+
+const resolved = resolveZodSchemaFromSources(schema, {
+  'handler.payload': { name: 'Previous Name' },
+  'context.user': { id: 'user-123' },
+});
+```
+
+### Working with Optional Fields
+
+The resolver handles optional fields gracefully:
+
+```typescript
+const schema = z.object({
+  required: z.string().from('body'),
+  optional: z.string().optional().from('query'),
+});
+
+const resolved = resolveZodSchemaFromSources(schema, {
+  body: { required: 'present' },
+  query: {}, // optional field missing
+});
+
+console.log(resolved);
+// { required: "present" }
+// 'optional' is not included since it wasn't found
+```
+
+### Extending Your Own Zod Instance
+
+If you need to extend a specific Zod instance:
+
+```typescript
+import { extendZod } from '@apisr/zod';
+import { z as myZod } from 'zod';
+
+const extended = extendZod(myZod);
+
+// Now use with .from() support
+const schema = extended.object({
+  name: extended.string().from('body'),
+});
+```
+
+<Warning>
+Calling `extendZod()` multiple times on the same Zod instance is safe - it will detect if the instance is already extended and return it as-is.
+</Warning>
+
+## Type Definitions
+
+### FieldMeta
+
+Metadata for a single schema field:
+
+```typescript
+interface FieldMeta {
+  from: string;              // Source identifier
+  key?: string | string[];   // Optional key mapping
+}
+```
+
+### SchemaFieldsMeta
+
+Metadata for all fields in a schema:
+
+```typescript
+type SchemaFieldsMeta = Record<string, FieldMeta>;
+```
+
+### FromKey
+
+Standard request source types:
+
+```typescript
+type FromKey = "query" | "params" | "body" | "headers";
+```
+
+### FromOptions
+
+Options for the `.from()` method:
+
+```typescript
+interface FromOptions {
+  key: string | string[];
+}
+```
+
+## Real-World Example
+
+Here's a complete example of using `@apisr/zod` in an API endpoint:
+
+```typescript
+import { z, resolveZodSchemaFromSources } from '@apisr/zod';
+
+// Define the schema with source annotations
+const updateUserSchema = z.object({
+  userId: z.string().uuid().from('params', { key: 'id' }),
+  name: z.string().min(1).from('body'),
+  email: z.string().email().from('body'),
+  age: z.number().int().positive().optional().from('body'),
+  auth: z.string().from('headers', { key: 'authorization' }),
+});
+
+// In your request handler
+function handleUpdateUser(req) {
+  // Resolve all values from different sources
+  const resolved = resolveZodSchemaFromSources(updateUserSchema, {
+    params: req.params,
+    body: req.body,
+    headers: req.headers,
+  });
+  
+  // Validate the resolved values
+  const validated = updateUserSchema.parse(resolved);
+  
+  // Use validated data
+  return updateUser(validated);
+}
+```
+
+## Benefits
+
+<CardGroup cols={2}>
+  <Card title="Type Safety" icon="shield-check">
+    Full TypeScript support with type inference
+  </Card>
+  <Card title="Declarative" icon="file-code">
+    Schema and source mapping in one place
+  </Card>
+  <Card title="Flexible" icon="screwdriver-wrench">
+    Support for custom sources and key mappings
+  </Card>
+  <Card title="DRY" icon="rotate">
+    Avoid repetitive value extraction code
+  </Card>
+</CardGroup>
+
+## Related Packages
+
+<CardGroup cols={2}>
+  <Card title="@apisr/api-aggregator" href="/packages/api-aggregator" icon="layer-group">
+    Use schemas with endpoint definitions
+  </Card>
+  <Card title="@apisr/transform" href="/packages/transform" icon="arrows-spin">
+    Data transformation with tag system
+  </Card>
+</CardGroup>

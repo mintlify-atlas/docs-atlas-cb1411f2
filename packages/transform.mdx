@@ -1,0 +1,343 @@
+---
+title: '@apisr/transform'
+description: 'Data transformation and collection management with registry-based tag system'
+---
+
+## Overview
+
+The `@apisr/transform` package provides a powerful system for defining data collections with typed transformations. It uses a registry-based approach with tags to describe data structures and enable safe transformations between different data formats.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @apisr/transform
+```
+
+```bash yarn
+yarn add @apisr/transform
+```
+
+```bash pnpm
+pnpm add @apisr/transform
+```
+
+```bash bun
+bun add @apisr/transform
+```
+</CodeGroup>
+
+## Exports
+
+The package exports the following core utilities:
+
+- `registry()` - Create a typed registry of tags
+- `collection()` - Define data collections with transformations
+- `BaseTag` - Base class for creating tags
+- `StringTag` - Specialized tag for string data
+- Type utilities: `Registry`, `Collection`, `PromiseOr`
+
+## Core Concepts
+
+### Tags
+
+Tags are typed descriptors for data fields. They define the shape and validation rules for data:
+
+```typescript
+import { BaseTag, StringTag } from '@apisr/transform';
+import { z } from '@apisr/zod';
+
+// Create a base tag
+const userIdTag = new BaseTag({
+  schema: z.string(),
+  required: true,
+});
+
+// Create a string tag with constraints
+const usernameTag = new BaseTag()
+  .string()
+  .min(3)
+  .max(20)
+  .required();
+
+// Create a number tag
+const ageTag = new BaseTag().number();
+```
+
+### Registry
+
+Registries organize collections of tags with type safety:
+
+```typescript
+import { registry } from '@apisr/transform';
+
+const userRegistry = registry((tag) => ({
+  id: tag.string().required(),
+  username: tag.string().min(3).max(20).required(),
+  email: tag.string().required(),
+  age: tag.number(),
+  bio: tag.string().max(500),
+}));
+
+// Access tags from the registry
+const idTag = userRegistry('id');
+const usernameTag = userRegistry('username');
+```
+
+### Collections
+
+Collections define versioned data structures with transformation capabilities:
+
+```typescript
+import { collection } from '@apisr/transform';
+
+const userCollection = collection({
+  // Version 1
+  'user.v1': {
+    id: z.string(),
+    name: z.string(),
+  },
+  
+  // Version 2 with additional fields
+  'user.v2': {
+    id: z.string(),
+    name: z.string(),
+    email: z.string(),
+    createdAt: z.date(),
+  },
+});
+```
+
+## Usage
+
+### Creating Tagged Schemas
+
+Define reusable, validated data structures:
+
+```typescript
+import { registry } from '@apisr/transform';
+import { z } from '@apisr/zod';
+
+const productRegistry = registry((tag) => ({
+  id: tag.string().required(),
+  name: tag.string().min(1).max(100).required(),
+  description: tag.string().max(1000),
+  price: tag.number().required(),
+  inStock: tag.schema(z.boolean()),
+  category: tag.string().required(),
+}));
+
+// Use the registry
+const nameTag = productRegistry('name');
+const priceTag = productRegistry('price');
+```
+
+### Tag Methods
+
+Tags provide a fluent API for defining constraints:
+
+#### String Tags
+
+```typescript
+const tag = new BaseTag()
+  .string()           // Create string tag
+  .min(5)            // Minimum length
+  .max(50)           // Maximum length
+  .required();       // Mark as required
+```
+
+#### Number Tags
+
+```typescript
+const tag = new BaseTag()
+  .number()          // Create number tag
+  .required();       // Mark as required
+```
+
+#### Custom Schema Tags
+
+```typescript
+import { z } from '@apisr/zod';
+
+const tag = new BaseTag()
+  .schema(z.object({
+    lat: z.number(),
+    lng: z.number(),
+  }))
+  .required();
+```
+
+### Transforming Data
+
+Transform data between different collection versions:
+
+```typescript
+import { collection } from '@apisr/transform';
+import { z } from '@apisr/zod';
+
+const userCollection = collection({
+  'user.v1': {
+    id: z.string(),
+    name: z.string(),
+  },
+  'user.v2': {
+    id: z.string(),
+    firstName: z.string(),
+    lastName: z.string(),
+  },
+});
+
+const result = userCollection.transform(
+  { id: '123', name: 'John Doe' },
+  {
+    from: 'user.v1',
+    to: 'user.v2',
+    mode: 'strict', // or 'warn' or 'loose'
+    explain: true,
+  }
+);
+
+// result: { value, errors, explain }
+```
+
+### Transform Options
+
+<ParamField path="from" type="string" required>
+  Source collection key (e.g., `"user.v1"`)
+</ParamField>
+
+<ParamField path="to" type="string" required>
+  Target collection key (e.g., `"user.v2"`)
+</ParamField>
+
+<ParamField path="mode" type="'strict' | 'warn' | 'loose'" default="strict">
+  Transformation strictness level:
+  - `strict`: Fail on any validation error
+  - `warn`: Log warnings but continue
+  - `loose`: Ignore validation errors
+</ParamField>
+
+<ParamField path="explain" type="boolean" default="false">
+  Include detailed explanation of the transformation
+</ParamField>
+
+### Collection Key Naming
+
+Collections support three naming patterns:
+
+```typescript
+// Simple naming
+'user': { ... }
+
+// Namespace naming
+'api.user': { ... }
+
+// Versioned naming
+'api.user@v1': { ... }
+'api.user@v2': { ... }
+```
+
+<Tip>
+Versioned naming is recommended for APIs that need to support multiple versions simultaneously.
+</Tip>
+
+## Advanced Features
+
+### Registry Derivation
+
+Create derived tags based on other tags (planned feature):
+
+```typescript
+const registry = registry((tag) => ({
+  firstName: tag.string(),
+  lastName: tag.string(),
+}))
+  .derive('fullName', (tags) => {
+    return `${tags.firstName} ${tags.lastName}`;
+  }, { when: 'always' });
+```
+
+<Warning>
+The `derive()` method is currently under development and will throw an error if called.
+</Warning>
+
+### Array Collections
+
+Transform arrays of data:
+
+```typescript
+const userCollection = collection({
+  'user.v1': {
+    id: z.string(),
+    name: z.string(),
+  },
+});
+
+// Transform array of users
+const arrayTransform = userCollection.arrayOf();
+```
+
+## Type Utilities
+
+### PromiseOr\<T\>
+
+Accepts either a value or a promise of that value:
+
+```typescript
+import type { PromiseOr } from '@apisr/transform';
+
+function processData(data: PromiseOr<string>): Promise<string> {
+  return Promise.resolve(data);
+}
+
+// Both work
+await processData('hello');
+await processData(Promise.resolve('hello'));
+```
+
+### UnwrapFunctionObject\<T\>
+
+Unwraps the return type of a function:
+
+```typescript
+import type { UnwrapFunctionObject } from '@apisr/transform';
+
+type Result = UnwrapFunctionObject<() => { name: string }>;
+// Result = { name: string }
+```
+
+## Error Handling
+
+<AccordionGroup>
+  <Accordion title="Tag not found error">
+    Thrown when accessing a non-existent tag from a registry:
+    
+    ```typescript
+    const registry = registry((tag) => ({
+      name: tag.string(),
+    }));
+    
+    registry('name');  // OK
+    registry('email'); // Error: Tag with name 'email' is not found.
+    ```
+  </Accordion>
+  
+  <Accordion title="Derive not developed error">
+    The `derive()` method is currently under development:
+    
+    ```typescript
+    registry.derive('fullName', ...); // Error: Derive is still not developed.
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Packages
+
+<CardGroup cols={2}>
+  <Card title="@apisr/zod" href="/packages/zod" icon="shield-check">
+    Extended Zod for schema validation
+  </Card>
+  <Card title="@apisr/schema" href="/packages/schema" icon="code">
+    Core schema types and utilities
+  </Card>
+</CardGroup>

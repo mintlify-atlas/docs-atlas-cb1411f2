@@ -1,0 +1,196 @@
+---
+title: Transport System
+description: Create and configure custom transports for the logger
+---
+
+## createTransport
+
+Creates a custom transport that defines where and how logs are output.
+
+```typescript
+import { createTransport } from '@daytona/logger';
+```
+
+### Signature
+
+```typescript
+function createTransport<TOptions extends TransportOptions>(
+  options: TOptions
+): Transport<TOptions>
+```
+
+### Parameters
+
+<ParamField path="options" type="TransportOptions" required>
+  Configuration options for the transport
+
+  <ParamField path="options.log" type="TransportLogFn" required>
+    Function called for each log entry. This is where you define how to handle the log.
+
+    **Signature:**
+    ```typescript
+    (ctx: TransportLogFnContext) => void
+    ```
+
+    The context object contains timestamp, level, message, data, file information, and store for maintaining state.
+  </ParamField>
+
+  <ParamField path="options.flush" type="TransportFlushFn">
+    Optional function called when the logger flushes. Use this to batch process logs or ensure all logs are written.
+
+    **Signature:**
+    ```typescript
+    (ctx: { store: Store; logs: Log[] }) => void | Promise<void>
+    ```
+
+    The context object contains store for transport-specific storage and logs array of all processed logs since the last flush.
+  </ParamField>
+</ParamField>
+
+### Returns
+
+A `Transport` object that can be used with `createLogger`.
+
+### Example: Simple Console Transport
+
+```typescript
+import { createTransport } from '@daytona/logger';
+
+const simpleConsole = createTransport({
+  log: ({ level, message, data }) => {
+    console.log(`[${level.toUpperCase()}] ${message}`, data);
+  }
+});
+
+const logger = createLogger({
+  transports: {
+    console: simpleConsole
+  }
+});
+```
+
+### Example: File Transport with Batching
+
+```typescript
+import { createTransport } from '@daytona/logger';
+import { writeFile } from 'fs/promises';
+
+const fileTransport = createTransport({
+  log: ({ timestamp, level, message, data, store }) => {
+    // Store logs in memory
+    const buffer = (store.get('buffer') as string[]) || [];
+    buffer.push(JSON.stringify({ timestamp, level, message, data }));
+    store.set('buffer', buffer);
+  },
+  
+  flush: async ({ store }) => {
+    // Write buffered logs to file
+    const buffer = (store.get('buffer') as string[]) || [];
+    if (buffer.length > 0) {
+      await writeFile('logs.jsonl', buffer.join('\n') + '\n', { flag: 'a' });
+      store.set('buffer', []);
+    }
+  }
+});
+
+const logger = createLogger({
+  transports: {
+    file: fileTransport
+  },
+  autoFlush: {
+    intervalMs: 5000, // Flush every 5 seconds
+    on: ['beforeExit']
+  }
+});
+```
+
+### Example: Remote API Transport
+
+```typescript
+import { createTransport } from '@daytona/logger';
+
+const apiTransport = createTransport({
+  log: ({ timestamp, level, message, data }) => {
+    // Send log to remote API (non-blocking)
+    fetch('https://api.example.com/logs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timestamp, level, message, data })
+    }).catch(err => console.error('Failed to send log:', err));
+  }
+});
+
+const logger = createLogger({
+  transports: {
+    api: apiTransport
+  }
+});
+```
+
+## Transport Interface
+
+The transport object returned by `createTransport` has the following structure:
+
+```typescript
+interface Transport<TOptions extends TransportOptions> {
+  log: TOptions["log"];
+  flush?: TOptions["flush"];
+  store: Store;
+}
+```
+
+### Store
+
+Each transport has access to a `Store` object for maintaining state between log calls. This is useful for batching, rate limiting, or tracking transport-specific metadata.
+
+```typescript
+interface Store {
+  get(name: string): unknown;
+  set(name: string, value: unknown): void;
+}
+```
+
+**Example:**
+```typescript
+const rateLimitedTransport = createTransport({
+  log: ({ level, message, store }) => {
+    const lastLog = store.get('lastLogTime') as number || 0;
+    const now = Date.now();
+    
+    // Rate limit: max 1 log per second
+    if (now - lastLog < 1000) {
+      return; // Skip this log
+    }
+    
+    console.log(`[${level}] ${message}`);
+    store.set('lastLogTime', now);
+  }
+});
+```
+
+## Type Definitions
+
+```typescript
+interface TransportLogFnContext extends Log {
+  file: {
+    path: string;
+    codeLine: string;
+  };
+  store: Store;
+}
+
+type TransportLogFn = (ctx: TransportLogFnContext) => void;
+
+type TransportFlushFn = (
+  ctx: Pick<TransportLogFnContext, "store"> & {
+    logs: Log[];
+  }
+) => PromiseLike<void> | void;
+
+interface TransportOptions {
+  flush?: TransportFlushFn;
+  log: TransportLogFn;
+}
+
+type AnyTransport = Transport<any>;
+```

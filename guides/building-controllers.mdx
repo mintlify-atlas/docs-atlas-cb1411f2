@@ -1,0 +1,633 @@
+---
+title: Building Controllers
+description: Guide for building type-safe controllers with @apisr/controller
+---
+
+## Overview
+
+`@apisr/controller` provides a powerful framework for building type-safe, reusable API controllers with:
+
+- **Type-safe payload validation** using Zod schemas
+- **Dependency injection** via bindings system
+- **Automatic request mapping** from query, params, body, and headers
+- **Error handling** with custom error responses
+- **Caching** support at handler and call level
+- **Model bindings** for automatic entity loading
+
+## Installation
+
+```bash
+bun add @apisr/controller @apisr/response @apisr/schema @apisr/zod
+```
+
+## Basic Setup
+
+<Steps>
+
+<Step title="Create handler options">
+
+Define your controller configuration using `createOptions`:
+
+```ts
+import { createOptions } from "@apisr/controller";
+import { createResponseHandler } from "@apisr/response";
+import { z } from "@apisr/zod";
+
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({
+    schema: z.object({
+      data: z.any(),
+      type: z.string(),
+    }),
+  }),
+}));
+
+const options = createOptions({
+  name: "user-controller",
+  responseHandler,
+});
+```
+
+</Step>
+
+<Step title="Create the handler">
+
+Create a handler factory from your options:
+
+```ts
+import { createHandler } from "@apisr/controller";
+
+const handler = createHandler(options);
+```
+
+</Step>
+
+<Step title="Define controller methods">
+
+Create controller methods using the handler:
+
+```ts
+const getUser = handler(
+  ({ payload }) => {
+    return {
+      id: payload.id,
+      name: "John Doe",
+    };
+  },
+  {
+    payload: z.object({
+      id: z.string(),
+    }),
+  }
+);
+```
+
+</Step>
+
+<Step title="Call the controller">
+
+Execute the controller and handle the result:
+
+```ts
+const { data, error } = await getUser({ id: "123" });
+
+if (error) {
+  console.error(error);
+} else {
+  console.log(data); // { id: "123", name: "John Doe" }
+}
+```
+
+</Step>
+
+</Steps>
+
+## Payload Validation
+
+### Schema Definition
+
+Define your payload schema using Zod:
+
+```ts
+const createUser = handler(
+  ({ payload }) => {
+    // payload is fully typed based on schema
+    return {
+      id: generateId(),
+      name: payload.name,
+      email: payload.email,
+      age: payload.age,
+    };
+  },
+  {
+    payload: z.object({
+      name: z.string(),
+      email: z.string().email(),
+      age: z.number().min(18).max(120),
+    }),
+  }
+);
+```
+
+### Automatic Request Mapping
+
+Use `.from()` to specify where each field comes from in the request:
+
+```ts
+const updateUser = handler(
+  ({ payload }) => {
+    // id comes from URL params
+    // name and email come from request body
+    // token comes from headers
+    return updateUserInDb(payload.id, {
+      name: payload.name,
+      email: payload.email,
+    });
+  },
+  {
+    payload: z.object({
+      id: z.string().from("params"),
+      name: z.string().from("body"),
+      email: z.string().from("body"),
+      token: z.string().from("headers", { key: "authorization" }),
+    }),
+  }
+);
+```
+
+<Tip>
+**Available sources:**
+
+- `"params"` — URL path parameters
+- `"query"` — URL query string
+- `"body"` — Request body
+- `"headers"` — Request headers
+- `"handler.payload"` — Previous handler result (for composition)
+</Tip>
+
+### Custom Key Mapping
+
+Map fields from different keys in the source:
+
+```ts
+const authenticate = handler(
+  ({ payload }) => {
+    // auth comes from "authorization" header
+    return verifyToken(payload.auth);
+  },
+  {
+    payload: z.object({
+      auth: z.string().from("headers", { key: "authorization" }),
+    }),
+  }
+);
+```
+
+## Error Handling
+
+### Defining Custom Errors
+
+Define custom error types with your response handler:
+
+```ts
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({
+    schema: z.object({
+      data: z.any(),
+      type: z.string(),
+    }),
+  }),
+  error: {
+    schema: z.object({
+      name: z.string(),
+      message: z.string(),
+    }),
+  },
+}))
+  .defineError("invalidEmail", {
+    name: "INVALID_EMAIL",
+    message: "The provided email is invalid",
+  })
+  .defineError("userNotFound", {
+    name: "USER_NOT_FOUND",
+    message: "User does not exist",
+  });
+```
+
+### Using Errors in Handlers
+
+Throw errors using the `fail` function:
+
+```ts
+const getUser = handler(
+  async ({ payload, fail }) => {
+    const user = await db.user.findById(payload.id);
+    
+    if (!user) {
+      throw fail("userNotFound");
+    }
+    
+    return user;
+  },
+  {
+    payload: z.object({
+      id: z.string(),
+    }),
+  }
+);
+```
+
+### Dynamic Error Input
+
+Define errors that accept input:
+
+```ts
+const responseHandler = createResponseHandler((options) => ({
+  json: options.json({ schema: z.object({ data: z.any() }) }),
+  error: {
+    schema: z.object({
+      name: z.string(),
+      message: z.string(),
+      field: z.string().optional(),
+    }),
+  },
+}))
+  .defineError(
+    "validationError",
+    ({ input }) => ({
+      name: "VALIDATION_ERROR",
+      message: `Validation failed for field: ${input.field}`,
+      field: input.field,
+    }),
+    {
+      input: z.object({
+        field: z.string(),
+      }),
+    }
+  );
+
+// Usage
+const handler = createHandler(createOptions({ responseHandler }));
+
+const validateUser = handler(
+  ({ payload, fail }) => {
+    if (!payload.email.includes("@")) {
+      throw fail("validationError", { field: "email" });
+    }
+    return { valid: true };
+  },
+  {
+    payload: z.object({
+      email: z.string(),
+    }),
+  }
+);
+```
+
+### Built-in Error Types
+
+The following error types are available by default:
+
+- `"unauthorized"` — 401 authentication required
+- `"forbidden"` — 403 access denied
+- `"notFound"` — 404 resource not found
+- `"badRequest"` — 400 invalid request
+- `"conflict"` — 409 resource conflict
+- `"tooMany"` — 429 rate limit exceeded
+- `"internal"` — 500 internal server error
+
+```ts
+const protectedRoute = handler(
+  ({ payload, fail }) => {
+    if (!payload.token) {
+      throw fail("unauthorized");
+    }
+    
+    const user = verifyToken(payload.token);
+    if (!user.isAdmin) {
+      throw fail("forbidden");
+    }
+    
+    return { success: true };
+  },
+  {
+    payload: z.object({
+      token: z.string().from("headers", { key: "authorization" }),
+    }),
+  }
+);
+```
+
+## Bindings System
+
+Bindings provide dependency injection for your handlers.
+
+### Value Bindings
+
+Inject static values:
+
+```ts
+const options = createOptions({
+  name: "api-controller",
+  bindings: (bindings) => ({
+    apiVersion: bindings.value("v1.0.0"),
+    maxPageSize: bindings.value(100),
+  }),
+});
+
+const handler = createHandler(options);
+
+const getInfo = handler(
+  ({ apiVersion, maxPageSize }) => {
+    return {
+      version: apiVersion,
+      limits: {
+        maxPageSize,
+      },
+    };
+  },
+  {
+    payload: z.object({}),
+    apiVersion: true,
+    maxPageSize: true,
+  }
+);
+```
+
+### Model Bindings
+
+Automatically load database entities:
+
+```ts
+import { modelBuilder } from "@apisr/drizzle-model";
+import * as schema from "./schema";
+
+const model = modelBuilder({ db, schema, relations, dialect: "PostgreSQL" });
+const userModel = model("user", {});
+
+const options = createOptions({
+  name: "user-controller",
+  bindings: (bindings) => ({
+    userModel: bindings.model(userModel, {
+      primaryKey: "id",
+      from: "params", // Load from URL params
+      load: async ({ id, fail }) => {
+        const user = await userModel.where({ id: esc(id) }).findFirst();
+        if (!user) {
+          throw fail("notFound");
+        }
+        return user;
+      },
+    }),
+  }),
+});
+
+const handler = createHandler(options);
+
+const getUser = handler(
+  ({ userModel }) => {
+    // userModel is already loaded based on URL params
+    return userModel;
+  },
+  {
+    payload: z.object({
+      id: z.string().from("params"),
+    }),
+    userModel: true, // Enable the binding
+  }
+);
+```
+
+### Custom Bindings
+
+Create custom dependency injection logic:
+
+```ts
+const options = createOptions({
+  name: "api-controller",
+  bindings: (bindings) => ({
+    currentUser: bindings.bind((options: { required: boolean }) => ({
+      mode: "toInject",
+      resolve: async ({ request, fail }) => {
+        const token = request?.headers?.authorization;
+        
+        if (!token && options.required) {
+          throw fail("unauthorized");
+        }
+        
+        if (!token) {
+          return null;
+        }
+        
+        const user = await verifyToken(token);
+        return user;
+      },
+    })),
+  }),
+});
+
+const handler = createHandler(options);
+
+const protectedRoute = handler(
+  ({ currentUser }) => {
+    // currentUser is automatically loaded from request headers
+    return {
+      message: `Hello, ${currentUser.name}!`,
+    };
+  },
+  {
+    payload: z.object({}),
+    currentUser: { required: true },
+  }
+);
+```
+
+### Binding Modes
+
+Bindings support different injection modes:
+
+- `"toInject"` (default) — User must explicitly enable the binding
+- `"alwaysInjected"` — Binding is always available in the handler
+- `"variativeInject"` — Conditionally inject based on `inject` function result
+
+```ts
+const options = createOptions({
+  bindings: (bindings) => ({
+    // Always injected - no need to enable in handler options
+    requestId: bindings.bind(() => ({
+      mode: "alwaysInjected",
+      resolve: async () => {
+        return crypto.randomUUID();
+      },
+    })),
+    
+    // Conditionally injected based on request
+    analytics: bindings.bind(() => ({
+      mode: "variativeInject",
+      inject: async ({ request }) => {
+        return request?.headers?.["x-analytics"] === "true";
+      },
+      resolve: async () => {
+        return createAnalyticsClient();
+      },
+    })),
+  }),
+});
+```
+
+## Caching
+
+### Handler-level Caching
+
+Cache handler results for all invocations:
+
+```ts
+const options = createOptions({
+  name: "user-controller",
+  cache: {
+    store: yourCacheStore, // e.g., Keyv instance
+    wrapHandler: true,
+    ttl: 60000, // 60 seconds
+    key: (payload) => `user:${payload.id}`,
+  },
+});
+```
+
+### Call-level Caching
+
+Cache specific handler invocations:
+
+```ts
+const getUser = handler(
+  async ({ payload, cache }) => {
+    // Use the cache function for granular caching
+    return await cache(["user", payload.id], async () => {
+      return await db.user.findById(payload.id);
+    });
+  },
+  {
+    payload: z.object({
+      id: z.string(),
+    }),
+    cache: {
+      store: cacheStore,
+      ttl: 30000, // 30 seconds for this specific call
+      key: (payload) => `user:${payload.id}`,
+    },
+  }
+);
+```
+
+## Integration with HTTP Frameworks
+
+### Elysia.js Integration
+
+```ts
+import { Elysia } from "elysia";
+import { handler } from "./controllers/user";
+
+const app = new Elysia();
+
+app.get("/users/:id", async ({ params, request }) => {
+  return await handler.raw({ request });
+});
+
+app.listen(3000);
+```
+
+### Raw Request Handling
+
+Convert standard HTTP requests:
+
+```ts
+const getUserHandler = handler(
+  ({ payload }) => {
+    return { user: { id: payload.id, name: "John" } };
+  },
+  {
+    payload: z.object({
+      id: z.string().from("params"),
+    }),
+  }
+);
+
+// Call with raw request
+const response = await getUserHandler.raw({
+  request: {
+    params: { id: "123" },
+    query: {},
+    headers: {},
+    body: {},
+  },
+});
+
+// Returns a standard Response object
+console.log(await response.json());
+```
+
+## Best Practices
+
+<Tip>
+**Organize by feature**
+
+Group related handlers together in feature-specific controllers:
+
+```ts
+// controllers/users.ts
+export const userController = {
+  getUser: handler(/* ... */),
+  createUser: handler(/* ... */),
+  updateUser: handler(/* ... */),
+  deleteUser: handler(/* ... */),
+};
+```
+</Tip>
+
+<Tip>
+**Share response handlers**
+
+Create a shared response handler for consistent API responses:
+
+```ts
+// lib/response.ts
+export const apiResponse = createResponseHandler((options) => ({
+  json: options.json({
+    schema: z.object({
+      data: z.any(),
+      timestamp: z.string(),
+    }),
+  }),
+  meta: {
+    schema: z.object({
+      requestId: z.string(),
+      version: z.string(),
+    }),
+    default: () => ({
+      requestId: crypto.randomUUID(),
+      version: "v1",
+    }),
+  },
+}));
+```
+</Tip>
+
+<Tip>
+**Validate early**
+
+Use Zod's built-in validators for common patterns:
+
+```ts
+payload: z.object({
+  email: z.string().email(),
+  url: z.string().url(),
+  uuid: z.string().uuid(),
+  age: z.number().int().positive().max(120),
+})
+```
+</Tip>
+
+<Warning>
+**Avoid over-nesting bindings**
+
+Keep binding resolution simple and avoid complex dependency chains that are hard to debug.
+</Warning>

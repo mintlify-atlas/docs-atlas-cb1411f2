@@ -1,0 +1,166 @@
+---
+title: Introduction to Apiser
+description: Collection of typed packages for backend and frontend application building with type-safe APIs, chainable models, and modern tooling
+---
+
+## What is Apiser?
+
+Apiser is a collection of typed TypeScript packages designed to streamline backend and frontend application development. It provides type-safe, chainable APIs that make building modern applications easier and more maintainable.
+
+<CardGroup cols={2}>
+  <Card title="Type-safe models" icon="database">
+    Build reusable Drizzle ORM models with progressive query flows and automatic type inference
+  </Card>
+  <Card title="Smart controllers" icon="function">
+    Create composable request handlers with built-in validation, caching, and error handling
+  </Card>
+  <Card title="Response utilities" icon="reply">
+    Standardized response formatting with consistent error handling across your API
+  </Card>
+  <Card title="Schema validation" icon="shield-check">
+    Universal schema validation powered by Zod with TypeBox support
+  </Card>
+</CardGroup>
+
+## Key features
+
+### Progressive query building
+
+Build database queries step-by-step with clear intent:
+
+```ts
+const users = await userModel
+  .where({ status: esc("active") })
+  .findMany()
+  .with({ posts: true })
+  .select({ id: true, name: true });
+```
+
+### Reusable model abstraction
+
+Define your models once and use them everywhere with consistent formatting:
+
+```ts
+const postModel = model("post", {
+  format(row) {
+    return {
+      ...row,
+      createdAt: new Date(row.createdAt),
+      updatedAt: row.updatedAt ? new Date(row.updatedAt) : null,
+    };
+  },
+});
+```
+
+### Type-safe request handlers
+
+Create handlers with automatic validation and type inference:
+
+```ts
+const getUserHandler = handler(
+  async ({ payload }) => {
+    const user = await userModel
+      .where({ id: esc(payload.id) })
+      .findFirst();
+    
+    return { user };
+  },
+  {
+    payload: z.object({
+      id: z.number(),
+    }),
+  }
+);
+```
+
+### Error-safe execution
+
+Handle errors gracefully with safe execution flows:
+
+```ts
+const result = await userModel.findMany().safe();
+
+if (result.error) {
+  console.error(result.error);
+} else {
+  console.log(result.data);
+}
+```
+
+## Core packages
+
+<CardGroup cols={2}>
+  <Card title="@apisr/drizzle-model" icon="layer-group" href="/packages/drizzle-model">
+    Type-safe, chainable model runtime for Drizzle ORM with progressive query building
+  </Card>
+  <Card title="@apisr/controller" icon="code" href="/packages/controller">
+    Composable request handlers with built-in validation, caching, and error handling
+  </Card>
+  <Card title="@apisr/response" icon="paper-plane" href="/packages/response">
+    Standardized response utilities for consistent API responses
+  </Card>
+  <Card title="@apisr/schema" icon="file-code" href="/packages/schema">
+    Universal schema validation with Zod support
+  </Card>
+  <Card title="@apisr/logger" icon="terminal" href="/packages/logger">
+    Colorful console logging with JSON formatting and stack trace parsing
+  </Card>
+  <Card title="@apisr/zod" icon="check-double" href="/packages/zod">
+    Enhanced Zod utilities for schema validation and type inference
+  </Card>
+</CardGroup>
+
+## Philosophy
+
+Apiser is built on these principles:
+
+- **Type safety first** - Leverage TypeScript's type system for compile-time guarantees
+- **Progressive enhancement** - Start simple and add complexity only when needed
+- **Composability** - Build complex functionality from simple, reusable pieces
+- **Developer experience** - Clear APIs, helpful errors, and minimal boilerplate
+- **Framework agnostic** - Works with Elysia, Hono, or any Node.js framework
+
+## Get started
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install the packages you need for your project
+  </Card>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Build your first application with Apiser in minutes
+  </Card>
+  <Card title="Drizzle Model Guide" icon="book" href="/guides/drizzle-model-guide">
+    Comprehensive guide for the Drizzle ORM model runtime
+  </Card>
+  <Card title="Building Controllers" icon="code" href="/guides/building-controllers">
+    Learn to build type-safe API controllers
+  </Card>
+</CardGroup>
+
+## Development status
+
+<Warning>
+Apiser is in active development and not recommended for production use yet. APIs may change between minor versions. Semantic versioning will be enforced after the v1.0.0 stable release.
+</Warning>
+
+## Community and support
+
+Apiser is an open-source project. Get help and contribute:
+
+- **GitHub** - [Report issues and contribute](https://github.com/1bye/apiser)
+- **Discord** - Join our community for discussions and support
+- **Documentation** - Comprehensive guides and API references
+
+## Next steps
+
+<Steps>
+  <Step title="Install packages">
+    Choose and install the Apiser packages you need
+  </Step>
+  <Step title="Follow the quick start">
+    Build a complete example application
+  </Step>
+  <Step title="Explore the API">
+    Learn about advanced features and customization options
+  </Step>
+</Steps>

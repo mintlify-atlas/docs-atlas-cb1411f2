@@ -1,0 +1,414 @@
+---
+title: "Transactions"
+description: "Execute multiple operations atomically using the .db() method to bind models to transaction instances."
+---
+
+## Overview
+
+The `.db()` method binds a model to a specific database or transaction instance. This enables atomic multi-operation workflows where all changes succeed together or fail together.
+
+## Syntax
+
+```ts
+model.db(dbInstance) => Model
+```
+
+## Parameters
+
+<ParamField path="dbInstance" type="DrizzleDB | Transaction" required>
+  A Drizzle database instance or transaction object.
+  
+  Typically used within `db.transaction()` callback to bind models to the transaction.
+</ParamField>
+
+## Return Value
+
+Returns a new model instance bound to the provided database/transaction. The original model is unchanged.
+
+## Basic Transaction
+
+```ts
+import { drizzle } from "drizzle-orm/node-postgres";
+import { modelBuilder } from "@apisr/drizzle-model";
+import * as schema from "./schema";
+import { relations } from "./relations";
+
+const db = drizzle(process.env.DATABASE_URL!, { schema, relations });
+
+const model = modelBuilder({ db, schema, relations, dialect: "PostgreSQL" });
+const userModel = model("user", {});
+const postModel = model("post", {});
+
+// Execute multiple operations atomically
+await db.transaction(async (tx) => {
+  // Bind models to transaction
+  const txUser = userModel.db(tx);
+  const txPost = postModel.db(tx);
+  
+  // All operations use the transaction
+  const user = await txUser.insert({
+    name: "Alice",
+    email: "alice@example.com",
+    age: 25,
+  }).returnFirst();
+  
+  await txPost.insert({
+    title: "First Post",
+    content: "Hello world",
+    authorId: user.id,
+  });
+  
+  // If any operation fails, everything rolls back
+});
+```
+
+## Examples
+
+### Transfer Operation
+
+```ts
+await db.transaction(async (tx) => {
+  const txAccount = accountModel.db(tx);
+  
+  // Deduct from source account
+  const source = await txAccount
+    .where({ id: esc(sourceId) })
+    .update({ balance: sql`balance - ${amount}` })
+    .returnFirst();
+  
+  if (!source || source.balance < 0) {
+    throw new Error("Insufficient funds");
+  }
+  
+  // Add to destination account
+  await txAccount
+    .where({ id: esc(destId) })
+    .update({ balance: sql`balance + ${amount}` });
+});
+```
+
+### Create User with Profile
+
+```ts
+await db.transaction(async (tx) => {
+  const txUser = userModel.db(tx);
+  const txProfile = profileModel.db(tx);
+  
+  const user = await txUser.insert({
+    email: "user@example.com",
+    name: "John Doe",
+  }).returnFirst();
+  
+  await txProfile.insert({
+    userId: user.id,
+    bio: "Software developer",
+    avatar: "https://example.com/avatar.jpg",
+  });
+});
+```
+
+### Conditional Rollback
+
+```ts
+try {
+  await db.transaction(async (tx) => {
+    const txOrder = orderModel.db(tx);
+    const txInventory = inventoryModel.db(tx);
+    
+    const order = await txOrder.insert({
+      userId: 123,
+      productId: 456,
+      quantity: 5,
+    }).returnFirst();
+    
+    const inventory = await txInventory
+      .where({ productId: esc(456) })
+      .update({ stock: sql`stock - 5` })
+      .returnFirst();
+    
+    if (inventory.stock < 0) {
+      throw new Error("Out of stock");
+    }
+  });
+} catch (error) {
+  console.error("Transaction failed:", error);
+  // All changes are rolled back
+}
+```
+
+### Multiple Model Operations
+
+```ts
+await db.transaction(async (tx) => {
+  const txUser = userModel.db(tx);
+  const txPost = postModel.db(tx);
+  const txComment = commentModel.db(tx);
+  
+  // Create user
+  const user = await txUser.insert({
+    name: "Alice",
+    email: "alice@example.com",
+    age: 25,
+  }).returnFirst();
+  
+  // Create post
+  const post = await txPost.insert({
+    title: "My First Post",
+    content: "Hello world",
+    authorId: user.id,
+  }).returnFirst();
+  
+  // Create comment
+  await txComment.insert({
+    content: "Great post!",
+    postId: post.id,
+    authorId: user.id,
+  });
+  
+  // All succeed or all fail together
+});
+```
+
+### Safe Transaction
+
+```ts
+const result = await db.transaction(async (tx) => {
+  const txUser = userModel.db(tx);
+  
+  const user = await txUser
+    .insert({ ... })
+    .returnFirst()
+    .safe();
+  
+  if (user.error) {
+    throw user.error; // Rollback transaction
+  }
+  
+  return user.data;
+});
+```
+
+## Nested Transactions
+
+Drizzle ORM supports savepoints for nested transactions:
+
+```ts
+await db.transaction(async (tx) => {
+  const txUser = userModel.db(tx);
+  
+  const user = await txUser.insert({ ... }).returnFirst();
+  
+  // Nested transaction (savepoint)
+  await tx.transaction(async (tx2) => {
+    const txPost = postModel.db(tx2);
+    
+    await txPost.insert({
+      authorId: user.id,
+      title: "Post",
+    });
+    
+    // Can rollback just this nested transaction
+  });
+});
+```
+
+## Read-Only Transactions
+
+Some databases support read-only transaction mode:
+
+```ts
+await db.transaction(async (tx) => {
+  const txUser = userModel.db(tx);
+  const txPost = postModel.db(tx);
+  
+  const users = await txUser.findMany();
+  const posts = await txPost.findMany();
+  
+  // Consistent snapshot - both queries see same data state
+  return { users, posts };
+}, {
+  accessMode: "read only", // PostgreSQL-specific
+});
+```
+
+## Transaction Isolation
+
+```ts
+await db.transaction(async (tx) => {
+  const txAccount = accountModel.db(tx);
+  
+  // Your operations here
+}, {
+  isolationLevel: "serializable", // Highest isolation
+});
+```
+
+Available isolation levels (database-dependent):
+- `"read uncommitted"`
+- `"read committed"` (default for most DBs)
+- `"repeatable read"`
+- `"serializable"`
+
+## Error Handling
+
+### Automatic Rollback
+
+```ts
+try {
+  await db.transaction(async (tx) => {
+    const txUser = userModel.db(tx);
+    
+    await txUser.insert({ ... });
+    
+    throw new Error("Something went wrong");
+    // Transaction automatically rolls back
+  });
+} catch (error) {
+  console.error("Transaction failed:", error);
+}
+```
+
+### Manual Rollback
+
+```ts
+await db.transaction(async (tx) => {
+  const txUser = userModel.db(tx);
+  
+  const user = await txUser.insert({ ... }).returnFirst();
+  
+  if (someCondition) {
+    tx.rollback(); // Explicit rollback
+  }
+});
+```
+
+### Safe Execution
+
+```ts
+const result = await db.transaction(async (tx) => {
+  const txUser = userModel.db(tx);
+  const txPost = postModel.db(tx);
+  
+  const userResult = await txUser
+    .insert({ ... })
+    .returnFirst()
+    .safe();
+  
+  if (userResult.error) {
+    throw userResult.error;
+  }
+  
+  const postResult = await txPost
+    .insert({ authorId: userResult.data.id })
+    .returnFirst()
+    .safe();
+  
+  if (postResult.error) {
+    throw postResult.error;
+  }
+  
+  return { user: userResult.data, post: postResult.data };
+}).catch(error => ({ error }));
+```
+
+## Transaction-Bound Models
+
+The `.db()` method returns a new model instance. The original model is unchanged:
+
+```ts
+const userModel = model("user", {});
+
+await db.transaction(async (tx) => {
+  const txUser = userModel.db(tx);
+  
+  // txUser uses the transaction
+  await txUser.insert({ ... });
+  
+  // Original userModel still uses main db
+  // await userModel.insert({ ... }); // ❌ Don't do this
+});
+
+// Outside transaction, use original model
+await userModel.findMany(); // ✅ Uses main db
+```
+
+## Performance Considerations
+
+### Keep Transactions Short
+
+```ts
+// ❌ Bad - long-running transaction holds locks
+await db.transaction(async (tx) => {
+  const txUser = userModel.db(tx);
+  
+  const user = await txUser.insert({ ... }).returnFirst();
+  
+  // Expensive external API call
+  await fetch("https://slow-api.com/notify");
+  
+  await txUser.update({ notified: true });
+});
+
+// ✅ Good - minimize transaction scope
+const user = await db.transaction(async (tx) => {
+  return await userModel.db(tx)
+    .insert({ ... })
+    .returnFirst();
+});
+
+// Do slow operations outside transaction
+await fetch("https://slow-api.com/notify");
+
+await userModel
+  .where({ id: esc(user.id) })
+  .update({ notified: true });
+```
+
+### Batch Operations
+
+```ts
+// ✅ Good - single transaction for related operations
+await db.transaction(async (tx) => {
+  const txPost = postModel.db(tx);
+  
+  await txPost.insert([
+    { title: "Post 1", content: "..." },
+    { title: "Post 2", content: "..." },
+    { title: "Post 3", content: "..." },
+  ]);
+});
+```
+
+## Type Safety
+
+Transaction-bound models preserve all type information:
+
+```ts
+await db.transaction(async (tx) => {
+  const txUser = userModel.db(tx);
+  
+  // Full type safety maintained
+  const user = await txUser.insert({
+    name: "Alice",    // ✅ Valid
+    email: "alice@example.com", // ✅ Valid
+    // invalid: 123  // ❌ Type error
+  }).returnFirst();
+  
+  // user type is correctly inferred
+  console.log(user.id); // ✅ TypeScript knows about 'id'
+});
+```
+
+## Notes
+
+<Note>
+  Always bind models to the transaction using `.db(tx)` at the start of the transaction callback. Don't use the original model instance inside a transaction.
+</Note>
+
+<Warning>
+  Keep transactions short and focused. Long-running transactions can cause database lock contention and performance issues.
+</Warning>
+
+<Note>
+  Transaction isolation levels are database-specific. Check your database documentation for supported levels.
+</Note>

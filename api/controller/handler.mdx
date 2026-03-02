@@ -1,0 +1,252 @@
+---
+title: Handler
+description: Core handler API for creating type-safe request handlers with schema validation, bindings, and caching
+---
+
+## createHandler
+
+Creates a handler factory function with custom options for building type-safe request handlers.
+
+```typescript
+import { createHandler } from '@apisr/controller';
+
+const handler = createHandler({
+  responseHandler: myResponseHandler,
+  bindings: (bind) => ({
+    user: bind.model(User),
+  }),
+  cache: {
+    store: myStore,
+  },
+});
+```
+
+<ParamField path="handlerOptions" type="HandlerOptions" required>
+  Configuration options for the handler factory
+  
+  <ParamField path="responseHandler" type="AnyResponseHandler">
+    Response handler instance for error formatting and response mapping
+  </ParamField>
+  
+  <ParamField path="bindings" type="(helpers: BindingsHelpers) => BindingsInput">
+    Factory function that returns bindings for dependency injection
+  </ParamField>
+  
+  <ParamField path="cache" type="CacheOptions">
+    Default cache configuration for all handlers
+    
+    <ParamField path="store" type="CacheStore" required>
+      Cache store implementation
+    </ParamField>
+    
+    <ParamField path="key" type="CacheKey | CacheKeyResolver">
+      Cache key or resolver function
+    </ParamField>
+    
+    <ParamField path="wrapHandler" type="boolean">
+      Whether to cache the entire handler response
+    </ParamField>
+  </ParamField>
+  
+  <ParamField path="name" type="string">
+    Name identifier for the handler
+  </ParamField>
+</ParamField>
+
+<ResponseField name="handler" type="HandlerFn.Base">
+  Handler factory function for creating individual handlers
+</ResponseField>
+
+## Handler Factory Function
+
+The function returned by `createHandler` is used to define individual request handlers.
+
+```typescript
+const getUser = handler(
+  async ({ payload, user, cache, fail }) => {
+    // Handler logic
+    return { id: user.id, name: user.name };
+  },
+  {
+    payload: { id: s.params("id") },
+    user: true,
+  }
+);
+```
+
+<ParamField path="callback" type="HandlerFn.Callback" required>
+  The handler function that processes requests
+  
+  **Context Properties:**
+  
+  <ParamField path="payload" type="InferUndefined<Schema>">
+    Validated payload data from the schema
+  </ParamField>
+  
+  <ParamField path="cache" type="CacheFn">
+    Cache function for memoizing expensive operations
+    
+    ```typescript
+    const result = await cache(['key', userId], async () => {
+      return await expensiveOperation();
+    });
+    ```
+  </ParamField>
+  
+  <ParamField path="fail" type="(name: string, input: any) => never">
+    Function to throw formatted errors via the response handler
+  </ParamField>
+  
+  <ParamField path="redirect" type="(to: string, returnType?: T) => T | {}">
+    Function to perform redirects with optional return type
+  </ParamField>
+  
+  <ParamField path="...bindings" type="InferredBindings">
+    All injected bindings are spread into the context
+  </ParamField>
+</ParamField>
+
+<ParamField path="options" type="HandlerFn.Options">
+  Per-handler configuration options
+  
+  <ParamField path="payload" type="Schema">
+    Schema definition for request validation
+  </ParamField>
+  
+  <ParamField path="cache" type="CacheOptions">
+    Override cache options for this handler
+  </ParamField>
+  
+  <ParamField path="...bindingOptions" type="OptionsBindings">
+    Configuration for each binding (pass `true` to enable or an options object)
+  </ParamField>
+</ParamField>
+
+<ResponseField name="component" type="HandlerFn.Component">
+  A compiled handler component with two execution modes
+  
+  <ResponseField name="component(data, opts?)" type="Promise<Result>">
+    Execute the handler in direct mode with type-safe data
+    
+    ```typescript
+    const { data, error } = await getUser({ id: '123' });
+    ```
+  </ResponseField>
+  
+  <ResponseField name="component.raw({ request })" type="Promise<Response>">
+    Execute the handler in raw mode with a full HTTP request
+    
+    ```typescript
+    const response = await getUser.raw({ request });
+    ```
+  </ResponseField>
+</ResponseField>
+
+## HandlerFn.Result
+
+The result object returned by handler components.
+
+```typescript
+interface Result<TData, TError> {
+  data: TData;
+  error: TError;
+}
+```
+
+<ParamField path="data" type="TData | null">
+  The successful response data, or `null` if an error occurred
+</ParamField>
+
+<ParamField path="error" type="TError | null">
+  The error object if the handler failed, or `null` on success
+</ParamField>
+
+## Usage Example
+
+```typescript
+import { createHandler, createOptions } from '@apisr/controller';
+import { createResponseHandler } from '@apisr/response';
+import { s } from '@apisr/schema';
+import { User } from './models';
+
+const responseHandler = createResponseHandler({
+  errors: {
+    notFound: { status: 404, message: 'Not found' },
+    internal: { status: 500, message: 'Internal error' },
+  },
+});
+
+const options = createOptions({
+  responseHandler,
+  bindings: (bind) => ({
+    user: bind.model(User, {
+      from: 'params',
+      fromKey: 'userId',
+      primaryKey: 'id',
+      async load({ id, fail }) {
+        const user = await User.findById(id);
+        if (!user) throw fail('notFound', { id });
+        return user;
+      },
+    }),
+  }),
+});
+
+const handler = createHandler(options);
+
+// Define a handler
+const getUser = handler(
+  async ({ payload, user }) => {
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+    };
+  },
+  {
+    payload: {
+      userId: s.params('id'),
+    },
+    user: true,
+  }
+);
+
+// Use the handler
+const { data, error } = await getUser({ userId: '123' });
+
+if (error) {
+  console.error('Failed to get user:', error);
+} else {
+  console.log('User:', data);
+}
+```
+
+## Type Utilities
+
+### HandlerFn.Context
+
+Infers the context type for a handler callback.
+
+```typescript
+type MyContext = HandlerFn.Context<typeof options, typeof handlerOptions>;
+```
+
+### HandlerFn.Component
+
+The compiled handler component type.
+
+```typescript
+type MyComponent = HandlerFn.Component<
+  typeof options,
+  typeof handlerOptions,
+  ReturnType<typeof callback>
+>;
+```
+
+### HandlerFn.Result
+
+The result type returned by handler execution.
+
+```typescript
+type MyResult = HandlerFn.Result<UserData, ErrorSchema>;
+```
