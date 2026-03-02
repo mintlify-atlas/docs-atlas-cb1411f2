@@ -8,7 +8,7 @@ description: Built-in console transport with JSON and pretty-print modes
 Creates a console transport with support for JSON and pretty-printed output.
 
 ```typescript
-import { createConsole } from '@daytona/logger/transports/console';
+import { createConsole } from '@apisr/logger/console';
 ```
 
 ### Signature
@@ -40,8 +40,8 @@ A `Transport` instance that can be used with `createLogger`.
 ### Example: JSON Mode (Default)
 
 ```typescript
-import { createLogger } from '@daytona/logger';
-import { createConsole } from '@daytona/logger/transports/console';
+import { createLogger } from '@apisr/logger';
+import { createConsole } from '@apisr/logger/console';
 
 const logger = createLogger({
   transports: {
@@ -56,8 +56,8 @@ logger.info('User action', { userId: '123', action: 'login' });
 ### Example: Pretty Mode
 
 ```typescript
-import { createLogger } from '@daytona/logger';
-import { createConsole } from '@daytona/logger/transports/console';
+import { createLogger } from '@apisr/logger';
+import { createConsole } from '@apisr/logger/console';
 
 const logger = createLogger({
   transports: {
@@ -107,8 +107,8 @@ When using `mode: 'pretty'`, the console transport:
 ### Example: Custom Format Function
 
 ```typescript
-import { createLogger } from '@daytona/logger';
-import { createConsole } from '@daytona/logger/transports/console';
+import { createLogger } from '@apisr/logger';
+import { createConsole } from '@apisr/logger/console';
 
 const logger = createLogger({
   transports: {
@@ -137,8 +137,8 @@ const customConsole = createTransport({
 ### Example: Multiple Console Transports
 
 ```typescript
-import { createLogger } from '@daytona/logger';
-import { createConsole } from '@daytona/logger/transports/console';
+import { createLogger } from '@apisr/logger';
+import { createConsole } from '@apisr/logger/console';
 
 const logger = createLogger({
   transports: {

@@ -8,7 +8,7 @@ description: Create a logger instance with custom transports and configuration
 Creates a logger instance with custom transports and configuration options.
 
 ```typescript
-import { createLogger } from '@daytona/logger';
+import { createLogger } from '@apisr/logger';
 ```
 
 ### Signature
@@ -53,8 +53,8 @@ A `Logger` instance with the following methods and properties.
 ### Example
 
 ```typescript
-import { createLogger, createTransport } from '@daytona/logger';
-import { createConsole } from '@daytona/logger/transports/console';
+import { createLogger, createTransport } from '@apisr/logger';
+import { createConsole } from '@apisr/logger/console';
 
 const logger = createLogger({
   name: 'MyApp',

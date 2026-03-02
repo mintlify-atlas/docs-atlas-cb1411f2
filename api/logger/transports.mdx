@@ -8,7 +8,7 @@ description: Create and configure custom transports for the logger
 Creates a custom transport that defines where and how logs are output.
 
 ```typescript
-import { createTransport } from '@daytona/logger';
+import { createTransport } from '@apisr/logger';
 ```
 
 ### Signature
@@ -54,7 +54,7 @@ A `Transport` object that can be used with `createLogger`.
 ### Example: Simple Console Transport
 
 ```typescript
-import { createTransport } from '@daytona/logger';
+import { createTransport } from '@apisr/logger';
 
 const simpleConsole = createTransport({
   log: ({ level, message, data }) => {
@@ -72,7 +72,7 @@ const logger = createLogger({
 ### Example: File Transport with Batching
 
 ```typescript
-import { createTransport } from '@daytona/logger';
+import { createTransport } from '@apisr/logger';
 import { writeFile } from 'fs/promises';
 
 const fileTransport = createTransport({
@@ -107,7 +107,7 @@ const logger = createLogger({
 ### Example: Remote API Transport
 
 ```typescript
-import { createTransport } from '@daytona/logger';
+import { createTransport } from '@apisr/logger';
 
 const apiTransport = createTransport({
   log: ({ timestamp, level, message, data }) => {

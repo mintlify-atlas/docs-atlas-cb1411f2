@@ -15,7 +15,7 @@ Converts a Controller handler component into an Elysia-compatible handler.
 import { Elysia } from 'elysia';
 import { createHandler } from '@apisr/controller';
 import { elysia } from '@apisr/controller/elysia';
-import { s } from '@apisr/schema';
+import { z } from '@apisr/zod';
 
 const handler = createHandler({});
 
@@ -25,7 +25,7 @@ const getUser = handler(
   },
   {
     payload: {
-      id: s.params('id'),
+      id: z.string().from('params', { key: 'id' }),
     },
   }
 );
@@ -89,7 +89,7 @@ interface HandlerRequest {
 import { Elysia } from 'elysia';
 import { createHandler } from '@apisr/controller';
 import { elysia } from '@apisr/controller/elysia';
-import { s } from '@apisr/schema';
+import { z } from '@apisr/zod';
 
 const handler = createHandler({});
 
@@ -99,7 +99,7 @@ const getHello = handler(
   },
   {
     payload: {
-      name: s.query('name').default('World'),
+      name: z.string().from('query', { key: 'name' }).default('World'),
     },
   }
 );
@@ -116,7 +116,7 @@ import { Elysia } from 'elysia';
 import { createHandler, createOptions } from '@apisr/controller';
 import { createResponseHandler } from '@apisr/response';
 import { elysia } from '@apisr/controller/elysia';
-import { s } from '@apisr/schema';
+import { z } from '@apisr/zod';
 import { User } from './models';
 
 const responseHandler = createResponseHandler({
@@ -162,7 +162,9 @@ const getUser = handler(
     };
   },
   {
-    payload: { id: s.params('id') },
+    payload: { 
+      id: z.string().from('params', { key: 'id' })
+    },
     user: true,
   }
 );
@@ -175,8 +177,8 @@ const createUser = handler(
   },
   {
     payload: {
-      name: s.body('name'),
-      email: s.body('email'),
+      name: z.string().from('body', { key: 'name' }),
+      email: z.string().from('body', { key: 'email' }),
     },
   }
 );
@@ -189,9 +191,9 @@ const updateUser = handler(
   },
   {
     payload: {
-      id: s.params('id'),
-      name: s.body('name').optional(),
-      email: s.body('email').optional(),
+      id: z.string().from('params', { key: 'id' }),
+      name: z.string().from('body', { key: 'name' }).optional(),
+      email: z.string().from('body', { key: 'email' }).optional(),
     },
     user: true,
   }
@@ -204,7 +206,9 @@ const deleteUser = handler(
     return { success: true };
   },
   {
-    payload: { id: s.params('id') },
+    payload: { 
+      id: z.string().from('params', { key: 'id' })
+    },
     user: true,
   }
 );
@@ -226,7 +230,7 @@ console.log(`Server running at http://localhost:3000`);
 import { Elysia } from 'elysia';
 import { createHandler, createOptions } from '@apisr/controller';
 import { elysia } from '@apisr/controller/elysia';
-import { s } from '@apisr/schema';
+import { z } from '@apisr/zod';
 import { verifyToken } from './auth';
 
 const options = createOptions({
@@ -279,7 +283,7 @@ const app = new Elysia()
 import { Elysia } from 'elysia';
 import { createHandler } from '@apisr/controller';
 import { elysia } from '@apisr/controller/elysia';
-import { s } from '@apisr/schema';
+import { z } from '@apisr/zod';
 import Keyv from 'keyv';
 
 const store = new Keyv();
@@ -305,7 +309,7 @@ const getStats = handler(
   },
   {
     payload: {
-      userId: s.params('userId'),
+      userId: z.string().from('params', { key: 'userId' }),
     },
   }
 );
@@ -330,7 +334,7 @@ const getUser = handler(
   },
   {
     payload: {
-      id: s.params('id'),
+      id: z.string().from('params', { key: 'id' }),
     },
   }
 );
@@ -370,7 +374,9 @@ const getResource = handler(
     return resource;
   },
   {
-    payload: { id: s.params('id') },
+    payload: { 
+      id: z.string().from('params', { key: 'id' })
+    },
   }
 );
 ```
